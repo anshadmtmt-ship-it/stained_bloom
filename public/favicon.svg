@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Emerald green background circle -->
+  <circle cx="50" cy="50" r="50" fill="#0F3D2E"/>
+  
+  <!-- Gold SB monogram -->
+  <!-- S letter -->
+  <path d="M 28 35 C 28 32, 30 30, 34 30 L 46 30 C 50 30, 52 32, 52 35 C 52 38, 50 40, 46 41 L 34 43 C 30 44, 28 46, 28 50 C 28 54, 30 56, 34 56 L 52 56"
+        fill="none" stroke="#B89A5B" stroke-width="4" stroke-linecap="round"/>
+  
+  <!-- B letter -->
+  <path d="M 56 30 L 56 70" fill="none" stroke="#B89A5B" stroke-width="4" stroke-linecap="round"/>
+  <path d="M 56 30 C 56 30, 72 30, 72 40 C 72 50, 56 50, 56 50" fill="none" stroke="#B89A5B" stroke-width="4" stroke-linecap="round"/>
+  <path d="M 56 50 C 56 50, 74 50, 74 60 C 74 70, 56 70, 56 70" fill="none" stroke="#B89A5B" stroke-width="4" stroke-linecap="round"/>
+  
+  <!-- Small gold dot accent -->
+  <circle cx="50" cy="82" r="3" fill="#B89A5B" opacity="0.7"/>
+</svg>

@@ -1,0 +1,147 @@
+@import "tailwindcss";
+
+@theme {
+  --font-serif: "Cormorant Garamond", Georgia, serif;
+  --font-sans: "Poppins", system-ui, sans-serif;
+  
+  --color-brand-bg: #FAF6F0;
+  --color-brand-green: #0E3B2E;
+  --color-brand-dark: #0A3025;
+  --color-brand-gold: #B89A5A;
+  --color-brand-champagne: #E8DDC7;
+  --color-brand-border: #E7DCCF;
+  --color-brand-brown: #4A3528;
+  --color-brand-text-sec: #6B6258;
+  
+  --animate-fade-up: fade-up 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  --animate-fade-in: fade-in 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  --animate-zoom-in: zoom-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  --animate-slide-down: slide-down 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(24px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes zoom-in {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes slide-down {
+  from { opacity: 0; transform: translateY(-16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: #FAF6F0; }
+::-webkit-scrollbar-thumb { background: #E7DCCF; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #B89A5A; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  background-color: #FAF6F0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.012'/%3E%3C/svg%3E");
+  color: #6B6258;
+  font-family: "Poppins", sans-serif;
+  overflow-x: hidden;
+}
+
+.text-serif { font-family: "Cormorant Garamond", Georgia, serif; }
+.text-sans { font-family: "Poppins", system-ui, sans-serif; }
+
+/* Soft gold separator */
+.separator-gold {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+}
+.separator-gold::before,
+.separator-gold::after {
+  content: "";
+  height: 1px;
+  background: linear-gradient(90deg, transparent, #B89A5A 50%, transparent);
+  flex-grow: 1;
+  margin: 0 16px;
+}
+
+/* Strict Design System Utilities */
+.shadow-luxury {
+  box-shadow: 0 12px 35px rgba(74, 53, 40, 0.04);
+}
+
+.shadow-luxury-hover {
+  box-shadow: 0 16px 45px rgba(74, 53, 40, 0.08);
+}
+
+/* Primary Button Styling */
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #0E3B2E;
+  color: #FAF6F0;
+  border-radius: 9999px;
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  letter-spacing: 0.12em;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 12px 35px rgba(74, 53, 40, 0.04);
+}
+.btn-primary:hover {
+  background-color: #0A3025;
+  box-shadow: 0 16px 45px rgba(74, 53, 40, 0.08);
+  transform: translateY(-1px);
+}
+
+/* Outline Button Styling */
+.btn-outline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid #0E3B2E;
+  background-color: transparent;
+  color: #0E3B2E;
+  border-radius: 9999px;
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  letter-spacing: 0.12em;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.btn-outline:hover {
+  background-color: #0E3B2E;
+  color: #FAF6F0;
+}
+
+/* Card Styling */
+.card-luxury {
+  background-color: #FAF6F0;
+  border: 1.5px solid #E7DCCF;
+  border-radius: 24px;
+  box-shadow: 0 12px 35px rgba(74, 53, 40, 0.04);
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.card-luxury:hover {
+  box-shadow: 0 16px 45px rgba(74, 53, 40, 0.08);
+  transform: translateY(-4px);
+}
+
+/* Grid transitions */
+.grid-item-transition {
+  transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), 
+              filter 0.4s cubic-bezier(0.16, 1, 0.3, 1), 
+              box-shadow 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.noise-overlay {
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+}
