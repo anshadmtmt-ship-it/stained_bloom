@@ -137,7 +137,7 @@ app.post('/api/login', rateLimitLogin, (req, res) => {
     return res.status(400).json({ error: 'Username and password are required.' });
   }
 
-  if (username === 'admin' && password === 'stainedbloomsadmin123') {
+  if (username === 'admin' && password === 'stainedbloom123') {
     const token = jwt.sign({ username }, SECRET_KEY, { expiresIn: '24h' });
     // Reset rate limit on successful login
     const ip = req.ip || req.socket.remoteAddress || 'unknown';
