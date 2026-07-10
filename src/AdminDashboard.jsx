@@ -352,7 +352,7 @@ function AdminDashboard() {
     }
   };
 
-  const handleSaveSettings = async () => {
+  const _handleSaveSettings = async () => {
     if (settings && settings.logoText && !settings.logoText.trim()) {
       showAlert('Validation Error', 'Logo text/brand name cannot be empty.');
       return;
@@ -590,6 +590,10 @@ function AdminDashboard() {
 
   const currentImages = gallery.filter(g => g.category === selectedCatName);
 
+  /* ─── Production detection ─────────────────────────────────────────────────── */
+  const isProduction = typeof window !== 'undefined' &&
+    !['localhost', '127.0.0.1'].includes(window.location.hostname);
+
   /* ─── RENDER: Main Admin Panel ────────────────────────────────────────────── */
   const TABS = [
     { id: 'gallery', label: 'Gallery', icon: ImageIcon },
@@ -600,6 +604,19 @@ function AdminDashboard() {
 
   return (
     <div className="min-h-screen bg-[#FAF6F0] text-sans flex flex-col md:flex-row relative text-[#6B6258] selection:bg-[#B89A5A]/20">
+
+      {/* Production Warning Banner */}
+      {isProduction && (
+        <div
+          role="alert"
+          className="fixed top-0 left-0 right-0 z-[9999] bg-amber-50 border-b border-amber-200 px-4 py-2.5 flex items-center justify-center gap-2 text-xs text-amber-800 font-medium"
+        >
+          <span aria-hidden="true">⚠️</span>
+          <span>
+            <strong>Read-only preview:</strong> This panel is running on the live server. Changes made here are <strong>not saved</strong>. To update content, run the server locally and push to GitHub.
+          </span>
+        </div>
+      )}
 
       {/* Toast Notification */}
       {notification.msg && (

@@ -1,4 +1,7 @@
 // cmsHelper.js — Stained Blooms CMS Backend API helper
+// In production (Vercel static hosting), the Express API is unavailable.
+// We fall back to the bundled default data so the site always renders content.
+import defaultData from '../server/data.json';
 
 // BroadcastChannel for real-time cross-tab sync
 const cmsChannel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('cms_sync') : null;
@@ -7,13 +10,14 @@ export async function getCMSData(key) {
   try {
     const res = await fetch(`/api/data/${key}`);
     if (!res.ok) {
-      if (res.status === 404) return null;
+      if (res.status === 404) return defaultData[key] ?? null;
       throw new Error(`Error fetching ${key}`);
     }
     return await res.json();
   } catch (error) {
-    console.error(`Fetch error for ${key}:`, error);
-    return null;
+    // API unavailable (production / Vercel) — use bundled defaults
+    console.warn(`Fetch error for ${key}, falling back to default data:`, error);
+    return defaultData[key] ?? null;
   }
 }
 
@@ -23,8 +27,9 @@ export async function getAllCMSData() {
     if (!res.ok) throw new Error('Error fetching all data');
     return await res.json();
   } catch (error) {
-    console.error('Fetch all error:', error);
-    return null;
+    // API unavailable (production / Vercel) — use bundled defaults
+    console.warn('Fetch all error, falling back to default data:', error);
+    return defaultData;
   }
 }
 
