@@ -1,7 +1,6 @@
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- STAINED BLOOMS — COMPLETE PRODUCTION DATABASE SCHEMA
 -- Run this in Supabase Dashboard → SQL Editor
--- Safe to re-run (uses IF NOT EXISTS + ON CONFLICT)
 -- ═══════════════════════════════════════════════════════════════════════════════
 
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
@@ -13,7 +12,8 @@ CREATE TABLE IF NOT EXISTS public.admin_users (
 );
 
 ALTER TABLE public.admin_users ENABLE ROW LEVEL SECURITY;
-CREATE POLICY IF NOT EXISTS "Users can read own admin status"
+DROP POLICY IF EXISTS "Users can read own admin status" ON public.admin_users;
+CREATE POLICY "Users can read own admin status"
   ON public.admin_users FOR SELECT USING (auth.uid() = id);
 
 -- Secure function to check if the current user is an admin
@@ -173,27 +173,45 @@ ALTER TABLE public.gallery_images     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.services           ENABLE ROW LEVEL SECURITY;
 
 -- Public read-only (anonymous / public website)
-CREATE POLICY IF NOT EXISTS "Public read website_settings"
+DROP POLICY IF EXISTS "Public read website_settings" ON public.website_settings;
+CREATE POLICY "Public read website_settings"
   ON public.website_settings FOR SELECT USING (true);
-CREATE POLICY IF NOT EXISTS "Public read contact"
+
+DROP POLICY IF EXISTS "Public read contact" ON public.contact;
+CREATE POLICY "Public read contact"
   ON public.contact FOR SELECT USING (true);
-CREATE POLICY IF NOT EXISTS "Public read gallery_categories"
+
+DROP POLICY IF EXISTS "Public read gallery_categories" ON public.gallery_categories;
+CREATE POLICY "Public read gallery_categories"
   ON public.gallery_categories FOR SELECT USING (true);
-CREATE POLICY IF NOT EXISTS "Public read gallery_images"
+
+DROP POLICY IF EXISTS "Public read gallery_images" ON public.gallery_images;
+CREATE POLICY "Public read gallery_images"
   ON public.gallery_images FOR SELECT USING (true);
-CREATE POLICY IF NOT EXISTS "Public read services"
+
+DROP POLICY IF EXISTS "Public read services" ON public.services;
+CREATE POLICY "Public read services"
   ON public.services FOR SELECT USING (true);
 
 -- Authenticated admin full CRUD (RLS ensures only designated admins can write)
-CREATE POLICY IF NOT EXISTS "Auth full website_settings"
+DROP POLICY IF EXISTS "Auth full website_settings" ON public.website_settings;
+CREATE POLICY "Auth full website_settings"
   ON public.website_settings FOR ALL TO authenticated USING (public.is_admin()) WITH CHECK (public.is_admin());
-CREATE POLICY IF NOT EXISTS "Auth full contact"
+
+DROP POLICY IF EXISTS "Auth full contact" ON public.contact;
+CREATE POLICY "Auth full contact"
   ON public.contact FOR ALL TO authenticated USING (public.is_admin()) WITH CHECK (public.is_admin());
-CREATE POLICY IF NOT EXISTS "Auth full gallery_categories"
+
+DROP POLICY IF EXISTS "Auth full gallery_categories" ON public.gallery_categories;
+CREATE POLICY "Auth full gallery_categories"
   ON public.gallery_categories FOR ALL TO authenticated USING (public.is_admin()) WITH CHECK (public.is_admin());
-CREATE POLICY IF NOT EXISTS "Auth full gallery_images"
+
+DROP POLICY IF EXISTS "Auth full gallery_images" ON public.gallery_images;
+CREATE POLICY "Auth full gallery_images"
   ON public.gallery_images FOR ALL TO authenticated USING (public.is_admin()) WITH CHECK (public.is_admin());
-CREATE POLICY IF NOT EXISTS "Auth full services"
+
+DROP POLICY IF EXISTS "Auth full services" ON public.services;
+CREATE POLICY "Auth full services"
   ON public.services FOR ALL TO authenticated USING (public.is_admin()) WITH CHECK (public.is_admin());
 
 -- ─── Storage Buckets ──────────────────────────────────────────────────────────
@@ -206,34 +224,56 @@ VALUES
 ON CONFLICT (id) DO NOTHING;
 
 -- Storage RLS policies
-CREATE POLICY IF NOT EXISTS "Public read gallery"
+DROP POLICY IF EXISTS "Public read gallery" ON storage.objects;
+CREATE POLICY "Public read gallery"
   ON storage.objects FOR SELECT USING (bucket_id = 'gallery');
-CREATE POLICY IF NOT EXISTS "Auth upload gallery"
+
+DROP POLICY IF EXISTS "Auth upload gallery" ON storage.objects;
+CREATE POLICY "Auth upload gallery"
   ON storage.objects FOR INSERT TO authenticated WITH CHECK (bucket_id = 'gallery' AND public.is_admin());
-CREATE POLICY IF NOT EXISTS "Auth delete gallery"
+
+DROP POLICY IF EXISTS "Auth delete gallery" ON storage.objects;
+CREATE POLICY "Auth delete gallery"
   ON storage.objects FOR DELETE TO authenticated USING (bucket_id = 'gallery' AND public.is_admin());
-CREATE POLICY IF NOT EXISTS "Auth update gallery"
+
+DROP POLICY IF EXISTS "Auth update gallery" ON storage.objects;
+CREATE POLICY "Auth update gallery"
   ON storage.objects FOR UPDATE TO authenticated USING (bucket_id = 'gallery' AND public.is_admin());
 
-CREATE POLICY IF NOT EXISTS "Public read logo"
+DROP POLICY IF EXISTS "Public read logo" ON storage.objects;
+CREATE POLICY "Public read logo"
   ON storage.objects FOR SELECT USING (bucket_id = 'logo');
-CREATE POLICY IF NOT EXISTS "Auth upload logo"
+
+DROP POLICY IF EXISTS "Auth upload logo" ON storage.objects;
+CREATE POLICY "Auth upload logo"
   ON storage.objects FOR INSERT TO authenticated WITH CHECK (bucket_id = 'logo' AND public.is_admin());
-CREATE POLICY IF NOT EXISTS "Auth delete logo"
+
+DROP POLICY IF EXISTS "Auth delete logo" ON storage.objects;
+CREATE POLICY "Auth delete logo"
   ON storage.objects FOR DELETE TO authenticated USING (bucket_id = 'logo' AND public.is_admin());
 
-CREATE POLICY IF NOT EXISTS "Public read hero"
+DROP POLICY IF EXISTS "Public read hero" ON storage.objects;
+CREATE POLICY "Public read hero"
   ON storage.objects FOR SELECT USING (bucket_id = 'hero');
-CREATE POLICY IF NOT EXISTS "Auth upload hero"
+
+DROP POLICY IF EXISTS "Auth upload hero" ON storage.objects;
+CREATE POLICY "Auth upload hero"
   ON storage.objects FOR INSERT TO authenticated WITH CHECK (bucket_id = 'hero' AND public.is_admin());
-CREATE POLICY IF NOT EXISTS "Auth delete hero"
+
+DROP POLICY IF EXISTS "Auth delete hero" ON storage.objects;
+CREATE POLICY "Auth delete hero"
   ON storage.objects FOR DELETE TO authenticated USING (bucket_id = 'hero' AND public.is_admin());
 
-CREATE POLICY IF NOT EXISTS "Public read backgrounds"
+DROP POLICY IF EXISTS "Public read backgrounds" ON storage.objects;
+CREATE POLICY "Public read backgrounds"
   ON storage.objects FOR SELECT USING (bucket_id = 'backgrounds');
-CREATE POLICY IF NOT EXISTS "Auth upload backgrounds"
+
+DROP POLICY IF EXISTS "Auth upload backgrounds" ON storage.objects;
+CREATE POLICY "Auth upload backgrounds"
   ON storage.objects FOR INSERT TO authenticated WITH CHECK (bucket_id = 'backgrounds' AND public.is_admin());
-CREATE POLICY IF NOT EXISTS "Auth delete backgrounds"
+
+DROP POLICY IF EXISTS "Auth delete backgrounds" ON storage.objects;
+CREATE POLICY "Auth delete backgrounds"
   ON storage.objects FOR DELETE TO authenticated USING (bucket_id = 'backgrounds' AND public.is_admin());
 
 -- ─── Enable Realtime ──────────────────────────────────────────────────────────
@@ -245,4 +285,4 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.services;
 
 -- ─── Done ─────────────────────────────────────────────────────────────────────
 -- Run this script once. All tables, triggers, RLS policies, and storage buckets
--- are now created. You can safely re-run it — all statements use IF NOT EXISTS.
+-- are now created.

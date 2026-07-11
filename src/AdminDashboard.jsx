@@ -303,6 +303,13 @@ function AdminDashboard() {
       
       setIsAuthenticated(true);
       setLoginError('');
+      
+      // Auto-populate database with defaults if it's completely empty
+      const seeded = await seedIfEmpty();
+      if (seeded) {
+        setTimeout(() => showNotification('Database populated with default template successfully!', 'success'), 500);
+      }
+      
       await loadData();
     } catch (err) {
       setLoginError(err.message || 'Invalid username or password.');

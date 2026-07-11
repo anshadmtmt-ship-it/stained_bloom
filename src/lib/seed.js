@@ -1,8 +1,7 @@
-// seed.js — One-time default data seeder
-// Runs at app boot and inserts defaults ONLY when all tables are completely empty.
-// Never overwrites existing data.
+// seed.js — Automated Default Data & Image Seeder
 import { supabase } from '../utils/supabase.js';
 import { fetchSettings, fetchContact, fetchCategories, fetchServices } from './db.js';
+import { uploadLogoImage, uploadHeroImage, uploadGalleryImage } from './storage.js';
 
 const DEFAULT_SETTINGS = {
   website_name:       'Stained Blooms',
@@ -58,11 +57,18 @@ const DEFAULT_SERVICES = [
   },
 ];
 
-/**
- * Seeds the database with default content — only if ALL tables are empty.
- * Safe to call on every app boot; it is a no-op when data already exists.
- * Returns true if seeding occurred, false otherwise.
- */
+async function getLocalFile(path, filename) {
+  try {
+    const res = await fetch(path);
+    if (!res.ok) throw new Error('Not found');
+    const blob = await res.blob();
+    return new File([blob], filename, { type: blob.type });
+  } catch (err) {
+    console.warn(`[Seed] Could not load local image ${path}`);
+    return null;
+  }
+}
+
 export async function seedIfEmpty() {
   try {
     const [settings, contact, categories, services] = await Promise.all([
@@ -80,20 +86,69 @@ export async function seedIfEmpty() {
 
     if (!isEmpty) return false;
 
-    console.log('[Seed] Database is empty — inserting default data...');
+    console.log('[Seed] Database is empty — starting full automated seed...');
 
+    // 1. Upload Logo & Hero
+    const logoFile = await getLocalFile('/images/logo.jpg', 'logo.jpg');
+    const heroFile = await getLocalFile('/images/hero.jpg', 'hero.jpg');
+    
+    let logo_url = '', hero_image_url = '';
+    if (logoFile) logo_url = await uploadLogoImage(logoFile);
+    if (heroFile) hero_image_url = await uploadHeroImage(heroFile);
+
+    // 2. Insert Settings & Contact & Services
     await Promise.all([
-      supabase.from('website_settings').insert(DEFAULT_SETTINGS),
+      supabase.from('website_settings').insert({ ...DEFAULT_SETTINGS, logo_url, hero_image_url }),
       supabase.from('contact').insert(DEFAULT_CONTACT),
-      supabase.from('gallery_categories').insert(DEFAULT_CATEGORIES),
       supabase.from('services').insert(DEFAULT_SERVICES),
     ]);
 
-    console.log('[Seed] Default data inserted successfully.');
+    // 3. Insert Categories and get their inserted IDs
+    const { data: insertedCategories, error: catError } = await supabase
+      .from('gallery_categories')
+      .insert(DEFAULT_CATEGORIES)
+      .select();
+
+    if (catError || !insertedCategories) throw new Error('Failed to insert categories');
+
+    const catMap = {};
+    insertedCategories.forEach(c => { catMap[c.slug] = c.id; });
+
+    // 4. Upload Gallery Images
+    const galleryMapping = [
+      { slug: 'minimal',  file: '/images/minimal_1.jpg', title: 'Minimal Design' },
+      { slug: 'arabic',   file: '/images/arabic_1.jpg',  title: 'Arabic Trails' },
+      { slug: 'bridal',   file: '/images/bridal_1.jpg',  title: 'Full Bridal' },
+      { slug: 'festival', file: '/images/festival_1.jpg',title: 'Festival Mandala' },
+      { slug: 'bridal',   file: '/images/couple_1.jpg',  title: 'Couple Portraits' },
+      { slug: 'bridal',   file: '/images/feet_1.jpg',    title: 'Bridal Feet' },
+      { slug: 'minimal',  file: '/images/cones.jpg',     title: 'Organic Cones' }
+    ];
+
+    let order = 0;
+    for (const item of galleryMapping) {
+      if (!catMap[item.slug]) continue;
+      
+      const file = await getLocalFile(item.file, item.file.split('/').pop());
+      if (!file) continue;
+
+      const uploadResult = await uploadGalleryImage(file);
+      if (!uploadResult) continue;
+
+      await supabase.from('gallery_images').insert({
+        category_id: catMap[item.slug],
+        title: item.title,
+        image_url: uploadResult.imageUrl,
+        thumbnail_url: uploadResult.thumbnailUrl,
+        display_order: order++,
+        visible: true
+      });
+    }
+
+    console.log('[Seed] Full default data and images seeded successfully.');
     return true;
   } catch (err) {
-    // Non-critical — app still works without defaults
-    console.warn('[Seed] Could not seed defaults:', err.message);
+    console.error('[Seed] Critical failure during seeding:', err);
     return false;
   }
 }
