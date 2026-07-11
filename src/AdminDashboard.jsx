@@ -1,12 +1,31 @@
-// AdminDashboard.jsx — Stained Blooms Admin Panel
+// AdminDashboard.jsx — Stained Blooms Admin Panel (Supabase Integration)
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Feather, Flower, Sparkles, Crown, Image as ImageIcon,
-  LogOut, Save, Trash2, Edit, Plus, X, ArrowLeft,
+  LogOut, Trash2, Edit, Plus, X, ArrowLeft,
   ChevronUp, ChevronDown, ChevronLeft, ChevronRight,
-  MessageSquare, Mail, Home, Loader2, Settings as SettingsIcon
+  MessageSquare, Mail, Home, Loader2, Settings as SettingsIcon,
+  AlertTriangle
 } from 'lucide-react';
-import { getCMSData, saveCMSData, uploadImage, loginAdmin, logoutAdmin, deleteUploadedImage } from './cmsHelper';
+import {
+  getCMSData,
+  saveWebsiteSettings,
+  saveContact,
+  saveCategory,
+  deleteCategory,
+  saveCategoriesList,
+  saveService,
+  deleteService,
+  saveServicesList,
+  saveGalleryItem,
+  deleteGalleryItem,
+  saveGalleryList,
+  uploadImage,
+  deleteUploadedImage,
+  loginAdmin,
+  logoutAdmin,
+  supabase
+} from './cmsHelper';
 
 const ICONS_MAP = {
   Sparkles: Sparkles,
@@ -29,7 +48,6 @@ function useFocusTrap(isActive, containerRef) {
     const first = focusable[0];
     const last = focusable[focusable.length - 1];
 
-    // Auto-focus first element
     if (first) first.focus();
 
     const handleKeyDown = (e) => {
@@ -56,7 +74,7 @@ function useFocusTrap(isActive, containerRef) {
 
 const Logo = ({ settings, className }) => {
   const [error, setError] = useState(false);
-  const logoUrl = settings?.logo || "/images/logo.jpg";
+  const logoUrl = settings?.logo;
   const logoText = settings?.logoText || "Stained Blooms";
 
   if (error || !logoUrl) {
@@ -87,9 +105,8 @@ function AdminDashboard() {
   const [loginError, setLoginError] = useState('');
   const [activeTab, setActiveTab] = useState('gallery');
   const [notification, setNotification] = useState({ msg: '', type: 'success' });
-  const [isDirty, setIsDirty] = useState(false);
-  const skipDirtyRef = useRef(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
   // CMS state values
   const [services, setServices] = useState([]);
@@ -97,6 +114,7 @@ function AdminDashboard() {
   const [categories, setCategories] = useState([]);
   const [contact, setContact] = useState(null);
   const [settings, setSettings] = useState(null);
+  const [hero, setHero] = useState(null);
 
   // Selected category in gallery tab
   const [selectedCatName, setSelectedCatName] = useState('');
@@ -154,74 +172,69 @@ function AdminDashboard() {
     });
   }, []);
 
-  // Load settings on mount (even if not authenticated, for login branding) & load remaining CMS data if auth is present
-  useEffect(() => {
-    const fetchBranding = async () => {
-      try {
-        const loadedSettings = await getCMSData('settings');
-        setSettings(loadedSettings || {});
-      } catch (e) {
-        console.warn("Failed to load settings on mount:", e);
-      }
-    };
-    fetchBranding();
-
-    if (sessionStorage.getItem('sb_admin_logged_in') === 'true') {
-      setIsAuthenticated(true);
-      loadData();
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    if (!skipDirtyRef.current) {
-      setIsDirty(true);
-    }
-  }, [gallery, categories, services, contact, settings]);
-
-  // Block navigation if dirty — only when authenticated
-  useEffect(() => {
-    if (!isAuthenticated) return;
-    const handleBeforeUnload = (e) => {
-      if (isDirty) {
-        e.preventDefault();
-        e.returnValue = 'You have unsaved changes. Are you sure you want to leave?';
-      }
-    };
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [isDirty, isAuthenticated]);
-
-  const handleTabChange = (newTab) => {
-    if (isDirty) {
-      showConfirm(
-        'Unsaved Changes',
-        'You have unsaved changes. Are you sure you want to discard them and switch tabs?',
-        () => {
-          loadData(); // Re-fetch to discard changes
-          setActiveTab(newTab);
-        },
-        'Discard Changes'
-      );
-    } else {
-      setActiveTab(newTab);
-    }
+  // Toast helper
+  const showNotification = (msg, type = 'success') => {
+    setNotification({ msg, type });
+    setTimeout(() => setNotification({ msg: '', type: 'success' }), 3000);
   };
 
+  // Check Auth & load settings
+  useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          setIsAuthenticated(true);
+          await loadData();
+        } else {
+          // Just fetch branding settings for the login page
+          const loadedSettings = await getCMSData('settings');
+          setSettings(loadedSettings || {});
+          setIsLoading(false);
+        }
+      } catch (e) {
+        console.warn("Failed session check:", e);
+        setIsLoading(false);
+      }
+    };
+    checkAuth();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Update document title and favicon dynamically in admin too
+  useEffect(() => {
+    if (settings) {
+      if (settings.metaTitle) document.title = `Admin | ${settings.metaTitle}`;
+      if (settings.favicon) {
+        const link = document.querySelector("link[rel*='icon']");
+        if (link) link.href = settings.favicon;
+      }
+    }
+  }, [settings]);
+
   const loadData = async () => {
+    setIsLoading(true);
     try {
-      const [loadedCategories, loadedServices, loadedGallery, loadedContact, loadedSettings] = await Promise.all([
+      const [
+        loadedCategories,
+        loadedServices,
+        loadedGallery,
+        loadedContact,
+        loadedSettings,
+        loadedHero
+      ] = await Promise.all([
         getCMSData('categories'),
         getCMSData('services'),
         getCMSData('gallery'),
         getCMSData('contact'),
-        getCMSData('settings')
+        getCMSData('settings'),
+        getCMSData('hero')
       ]);
 
-      skipDirtyRef.current = true;
       const validCategories = loadedCategories || [];
       setCategories(validCategories);
 
+      // Default select the first non-'All' category
       const firstCat = validCategories.find(c => c.name !== 'All');
       if (firstCat) {
         setSelectedCatName(firstCat.name);
@@ -231,31 +244,26 @@ function AdminDashboard() {
       setGallery(loadedGallery || []);
       setContact(loadedContact || {});
       setSettings(loadedSettings || {});
-
-      setTimeout(() => {
-        setIsDirty(false);
-        skipDirtyRef.current = false;
-      }, 100);
+      setHero(loadedHero || {});
     } catch (e) {
       console.error(e);
-      showAlert('Error', 'Failed to load CMS data from server.');
+      showAlert('Error', 'Failed to retrieve cloud CMS data.');
+    } finally {
+      setIsLoading(false);
     }
-  };
-
-  const showNotification = (msg, type = 'success') => {
-    setNotification({ msg, type });
-    setTimeout(() => setNotification({ msg: '', type: 'success' }), 3500);
   };
 
   const handleLogin = async (e) => {
     e.preventDefault();
+    setIsLoading(true);
     try {
       await loginAdmin(username, password);
       setIsAuthenticated(true);
       setLoginError('');
-      loadData();
+      await loadData();
     } catch (err) {
       setLoginError(err.message || 'Invalid username or password.');
+      setIsLoading(false);
     }
   };
 
@@ -263,10 +271,9 @@ function AdminDashboard() {
     showConfirm(
       'Logout?',
       'Are you sure you want to log out of the admin panel?',
-      () => {
-        logoutAdmin(); // clears both sb_admin_token and sb_admin_logged_in
+      async () => {
+        await logoutAdmin();
         setIsAuthenticated(false);
-        setIsDirty(false); // prevent beforeunload after logout
         setUsername('');
         setPassword('');
       },
@@ -274,103 +281,27 @@ function AdminDashboard() {
     );
   };
 
-  // Image upload helper
+  // ─── IMAGE UPLOAD HANDLING ───────────────────────────────────────────────────
   const handleImageSelect = async (e, callback) => {
     const file = e.target.files[0];
     if (!file) return;
 
-    if (file.size > 2 * 1024 * 1024) {
-      showAlert('File Too Large', 'Image must be under 2MB.');
-      e.target.value = '';
-      return;
-    }
-    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
-    if (!allowedTypes.includes(file.type)) {
-      showAlert('Invalid File Type', 'Only JPEG, PNG, and WebP images are accepted.');
-      e.target.value = '';
-      return;
-    }
+    setIsSaving(true);
+    showNotification('Uploading image to cloud storage...', 'info');
+
     try {
       const imageUrl = await uploadImage(file);
-      callback(imageUrl);
+      await callback(imageUrl);
     } catch (err) {
       showAlert('Upload Failed', err.message || 'Failed to upload image. Please try again.');
+    } finally {
+      setIsSaving(false);
     }
     e.target.value = '';
   };
 
-  // Save changes triggers
-  const handleSaveGallery = async () => {
-    setIsSaving(true);
-    try {
-      await saveCMSData('gallery', gallery);
-      await saveCMSData('categories', categories);
-      showNotification('✓ Gallery changes saved successfully.');
-      setTimeout(() => setIsDirty(false), 50);
-    } catch (e) {
-      showAlert('Save Failed', e.message || 'Failed to save gallery changes. Please try again.');
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const handleSaveServices = async () => {
-    if (services.some(s => !s.name?.trim())) {
-      showAlert('Validation Error', 'All packages must have a name.');
-      return;
-    }
-    setIsSaving(true);
-    try {
-      await saveCMSData('services', services);
-      showNotification('✓ Services and packages saved successfully.');
-      setTimeout(() => setIsDirty(false), 50);
-    } catch (e) {
-      showAlert('Save Failed', e.message || 'Failed to save services. Please try again.');
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const handleSaveContact = async () => {
-    if (contact.emailAddress && !/^\S+@\S+\.\S+$/.test(contact.emailAddress)) {
-      showAlert('Validation Error', 'Please enter a valid email address.');
-      return;
-    }
-    if (contact.instagramUrl && !contact.instagramUrl.startsWith('http')) {
-      showAlert('Validation Error', 'Instagram URL must start with http:// or https://');
-      return;
-    }
-    setIsSaving(true);
-    try {
-      await saveCMSData('contact', contact);
-      showNotification('✓ Contact details saved successfully.');
-      setTimeout(() => setIsDirty(false), 50);
-    } catch (e) {
-      showAlert('Save Failed', e.message || 'Failed to save contact details. Please try again.');
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const _handleSaveSettings = async () => {
-    if (settings && settings.logoText && !settings.logoText.trim()) {
-      showAlert('Validation Error', 'Logo text/brand name cannot be empty.');
-      return;
-    }
-    setIsSaving(true);
-    try {
-      await saveCMSData('settings', settings);
-      showNotification('✓ Branding settings saved successfully.');
-      setTimeout(() => setIsDirty(false), 50);
-    } catch (e) {
-      showAlert('Save Failed', e.message || 'Failed to save settings. Please try again.');
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  // Categories helper actions
-  const handleAddCategorySubmit = () => {
+  // ─── CATEGORY MUTATIONS (IMMEDIATE AUTO-SAVE) ─────────────────────────────────
+  const handleAddCategorySubmit = async () => {
     if (!newCatVal.trim()) {
       setIsAddingCat(false);
       return;
@@ -382,18 +313,28 @@ function AdminDashboard() {
       setNewCatVal('');
       return;
     }
-    const newCat = {
-      id: `cat-${Date.now()}`,
-      name: cleanName,
-      isVisible: true
-    };
-    setCategories([...categories, newCat]);
-    setSelectedCatName(cleanName);
-    setNewCatVal('');
-    setIsAddingCat(false);
+
+    setIsSaving(true);
+    try {
+      const newCat = {
+        name: cleanName,
+        isVisible: true,
+        order: categories.length
+      };
+      await saveCategory(newCat);
+      await loadData();
+      setSelectedCatName(cleanName);
+      setNewCatVal('');
+      setIsAddingCat(false);
+      showNotification('✓ Category created successfully.');
+    } catch (e) {
+      showAlert('Save Failed', 'Could not save category: ' + e.message);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  const saveCategoryRename = (catId) => {
+  const saveCategoryRename = async (catId) => {
     if (!renameVal.trim()) {
       setRenamingCatId(null);
       return;
@@ -408,35 +349,54 @@ function AdminDashboard() {
       return;
     }
 
-    setCategories(categories.map(c => c.id === catId ? { ...c, name: cleanName } : c));
-    setGallery(gallery.map(g => g.category === originalCat.name ? { ...g, category: cleanName } : g));
+    setIsSaving(true);
+    try {
+      await saveCategory({ ...originalCat, name: cleanName });
+      
+      // Update items inside this category immediately
+      const itemsToUpdate = gallery.filter(g => g.category === originalCat.name);
+      for (const item of itemsToUpdate) {
+        await saveGalleryItem({ ...item, category: cleanName });
+      }
 
-    if (selectedCatName === originalCat.name) {
-      setSelectedCatName(cleanName);
+      await loadData();
+      if (selectedCatName === originalCat.name) {
+        setSelectedCatName(cleanName);
+      }
+      setRenamingCatId(null);
+      showNotification('✓ Category renamed successfully.');
+    } catch (e) {
+      showAlert('Save Failed', 'Could not rename category: ' + e.message);
+    } finally {
+      setIsSaving(false);
     }
-    setRenamingCatId(null);
   };
 
   const deleteCategoryCustom = (catId, catName) => {
     showConfirm(
       'Delete Category?',
-      `Are you sure you want to delete category "${catName}"? All images inside it will also be deleted.`,
-      () => {
-        // Attempt to clean up uploaded files for images in this category
-        gallery
-          .filter(g => g.category === catName && g.image?.startsWith('/images/uploads/'))
-          .forEach(g => deleteUploadedImage(g.image));
-
-        setCategories(categories.filter(c => c.id !== catId));
-        setGallery(gallery.filter(g => g.category !== catName));
-
-        const remainingCats = categories.filter(c => c.id !== catId && c.name !== 'All');
-        setSelectedCatName(remainingCats.length > 0 ? remainingCats[0].name : '');
+      `Are you sure you want to delete category "${catName}"? All images inside it will also be deleted from storage and database.`,
+      async () => {
+        setIsSaving(true);
+        try {
+          // Clean up files in storage
+          const imagesToDelete = gallery.filter(g => g.category === catName);
+          for (const item of imagesToDelete) {
+            await deleteUploadedImage(item.image);
+          }
+          await deleteCategory(catId);
+          await loadData();
+          showNotification('✓ Category deleted successfully.');
+        } catch (e) {
+          showAlert('Delete Failed', 'Failed to delete category: ' + e.message);
+        } finally {
+          setIsSaving(false);
+        }
       }
     );
   };
 
-  const moveCategoryInline = (editableIndex, direction) => {
+  const moveCategoryInline = async (editableIndex, direction) => {
     const actualIndex = editableIndex + 1; // skip 'All' at index 0
     const newCats = [...categories];
     const editableCatCount = categories.filter(c => c.name !== 'All').length;
@@ -448,70 +408,235 @@ function AdminDashboard() {
       const targetIndex = actualIndex + 1;
       [newCats[actualIndex], newCats[targetIndex]] = [newCats[targetIndex], newCats[actualIndex]];
     }
-    setCategories(newCats);
+
+    setIsSaving(true);
+    try {
+      await saveCategoriesList(newCats);
+      await loadData();
+      showNotification('✓ Categories reordered.');
+    } catch (e) {
+      showAlert('Save Failed', 'Reorder failed: ' + e.message);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  // Gallery items helpers
-  const handleAddImage = (imageUrl) => {
+  // ─── GALLERY MUTATIONS (IMMEDIATE AUTO-SAVE) ───────────────────────────────────
+  const handleAddImage = async (imageUrl) => {
     const currentImages = gallery.filter(g => g.category === selectedCatName);
     if (currentImages.length >= 8) {
-      showAlert('Limit Reached', 'Maximum of 8 images per category.');
+      showAlert('Limit Reached', 'Maximum 8 images are allowed in each category.');
       return;
     }
 
-    const newItem = {
-      id: Date.now(),
-      category: selectedCatName,
-      title: '',
-      description: '',
-      image: imageUrl
-    };
-    setGallery([...gallery, newItem]);
+    setIsSaving(true);
+    try {
+      const newItem = {
+        category: selectedCatName,
+        image: imageUrl,
+        title: '',
+        description: '',
+        order: currentImages.length,
+        visible: true
+      };
+      await saveGalleryItem(newItem);
+      await loadData();
+      showNotification('✓ Image saved successfully.');
+    } catch (e) {
+      showAlert('Save Failed', 'Failed to save image record: ' + e.message);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleSaveImageDetails = async () => {
+    setIsSaving(true);
+    try {
+      await saveGalleryItem(editingImage);
+      await loadData();
+      setEditingImage(null);
+      showNotification('✓ Image details updated.');
+    } catch (e) {
+      showAlert('Save Failed', 'Failed to update image details: ' + e.message);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleDeleteImage = (item) => {
     showConfirm(
       'Delete Image?',
-      'Are you sure you want to delete this gallery image?',
-      () => {
-        // Attempt cleanup of uploaded file
-        deleteUploadedImage(item.image);
-        setGallery(gallery.filter(g => g.id !== item.id));
+      'Are you sure you want to delete this gallery image from the database and storage?',
+      async () => {
+        setIsSaving(true);
+        try {
+          await deleteUploadedImage(item.image);
+          await deleteGalleryItem(item.id);
+          await loadData();
+          showNotification('✓ Image deleted.');
+        } catch (e) {
+          showAlert('Delete Failed', 'Failed to delete image: ' + e.message);
+        } finally {
+          setIsSaving(false);
+        }
       }
     );
   };
 
-  // Services/Packages helpers
-  const handleAddService = () => {
-    const newSvc = {
-      id: `svc-${Date.now()}`,
-      name: 'New Package',
-      price: '',
-      icon: 'Sparkles',
-      description: 'ELEGANT DESIGN',
-      details: 'Intricate custom henna design.',
-      isFeatured: false
-    };
-    setServices([...services, newSvc]);
-    setEditingSvc(newSvc); // Open popup immediately for new package
+  // ─── HTML5 DRAG & DROP FOR GALLERY IMAGES ──────────────────────────────────────
+  const handleDragStart = (e, index) => {
+    e.dataTransfer.setData('text/plain', index);
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+  };
+
+  const handleDrop = async (e, targetIndex, currentImagesList) => {
+    const sourceIndex = parseInt(e.dataTransfer.getData('text/plain'), 10);
+    if (isNaN(sourceIndex) || sourceIndex === targetIndex) return;
+
+    const newImages = [...currentImagesList];
+    const [removed] = newImages.splice(sourceIndex, 1);
+    newImages.splice(targetIndex, 0, removed);
+
+    setIsSaving(true);
+    try {
+      // Map other images back to the main list with their new display orders
+      const updatedList = gallery.map(item => {
+        if (item.category === selectedCatName) {
+          const newIdx = newImages.findIndex(img => img.id === item.id);
+          return { ...item, order: newIdx };
+        }
+        return item;
+      });
+
+      // Sort the list properly before sending
+      updatedList.sort((a, b) => a.order - b.order);
+
+      await saveGalleryList(updatedList);
+      await loadData();
+      showNotification('✓ Image order updated.');
+    } catch (err) {
+      showAlert('Reorder Failed', 'Failed to save image order: ' + err.message);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // ─── SERVICES MUTATIONS (IMMEDIATE AUTO-SAVE) ──────────────────────────────────
+  const handleAddService = async () => {
+    setIsSaving(true);
+    try {
+      const newSvc = {
+        name: 'New Package',
+        description: 'Bespoke Mehendi package tailored for your celebration.',
+        icon: 'Sparkles',
+        isFeatured: false,
+        order: services.length
+      };
+      const created = await saveService(newSvc);
+      await loadData();
+      
+      // Auto-open modal for the new service
+      if (created) {
+        setEditingSvc({
+          id: created.id,
+          name: created.title,
+          description: created.description,
+          icon: created.icon,
+          isFeatured: created.featured,
+          order: created.display_order
+        });
+      }
+      showNotification('✓ Service package added.');
+    } catch (e) {
+      showAlert('Save Failed', 'Failed to add service: ' + e.message);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleSaveServiceDetails = async () => {
+    setIsSaving(true);
+    try {
+      await saveService(editingSvc);
+      await loadData();
+      setEditingSvc(null);
+      showNotification('✓ Service package updated.');
+    } catch (e) {
+      showAlert('Save Failed', 'Failed to save package: ' + e.message);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleDeleteService = (svcId) => {
     showConfirm(
       'Delete Package?',
-      'Are you sure you want to delete this package?',
-      () => setServices(services.filter(s => s.id !== svcId))
+      'Are you sure you want to delete this service package?',
+      async () => {
+        setIsSaving(true);
+        try {
+          await deleteService(svcId);
+          await loadData();
+          showNotification('✓ Service package deleted.');
+        } catch (e) {
+          showAlert('Delete Failed', 'Failed to delete service: ' + e.message);
+        } finally {
+          setIsSaving(false);
+        }
+      }
     );
   };
 
-  const moveServiceInline = (index, direction) => {
+  const moveServiceInline = async (index, direction) => {
     if (direction === 'up' && index === 0) return;
     if (direction === 'down' && index === services.length - 1) return;
 
     const newSvcs = [...services];
     const targetIdx = direction === 'up' ? index - 1 : index + 1;
     [newSvcs[index], newSvcs[targetIdx]] = [newSvcs[targetIdx], newSvcs[index]];
-    setServices(newSvcs);
+
+    setIsSaving(true);
+    try {
+      await saveServicesList(newSvcs);
+      await loadData();
+      showNotification('✓ Services reordered.');
+    } catch (e) {
+      showAlert('Save Failed', 'Failed to save order: ' + e.message);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // ─── CONTACT AUTO-SAVE ───────────────────────────────────────────────────────
+  const triggerContactAutoSave = async (updatedContact) => {
+    setIsSaving(true);
+    try {
+      await saveContact(updatedContact);
+      setContact(updatedContact);
+      showNotification('✓ Contact details saved successfully.');
+    } catch (e) {
+      showNotification('✕ Save failed: ' + e.message, 'error');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // ─── SETTINGS AUTO-SAVE ──────────────────────────────────────────────────────
+  const triggerSettingsAutoSave = async (updatedSettings, updatedHero) => {
+    setIsSaving(true);
+    try {
+      await saveWebsiteSettings(updatedSettings, updatedHero);
+      if (updatedSettings) setSettings(updatedSettings);
+      if (updatedHero) setHero(updatedHero);
+      showNotification('✓ Branding settings saved successfully.');
+    } catch (e) {
+      showNotification('✕ Save failed: ' + e.message, 'error');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   /* ─── RENDER: Login Screen ───────────────────────────────────────────────── */
@@ -530,7 +655,7 @@ function AdminDashboard() {
           <form onSubmit={handleLogin} className="space-y-5 text-left" noValidate>
             <div>
               <label htmlFor="admin-username" className="text-xs uppercase tracking-wider text-[#6B6258] block mb-2 font-semibold">
-                Username
+                Username / Email
               </label>
               <input
                 id="admin-username"
@@ -539,6 +664,7 @@ function AdminDashboard() {
                 onChange={(e) => setUsername(e.target.value)}
                 className="w-full rounded-[18px] border border-[#E7DCCF] bg-[#FAF6F0] p-3.5 text-sm focus:outline-none focus:border-[#B89A5A] text-[#4A3528]"
                 placeholder="admin"
+                disabled={isLoading}
                 required
                 autoComplete="username"
               />
@@ -555,6 +681,7 @@ function AdminDashboard() {
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full rounded-[18px] border border-[#E7DCCF] bg-[#FAF6F0] p-3.5 text-sm focus:outline-none focus:border-[#B89A5A] text-[#4A3528]"
                 placeholder="••••••••••••••"
+                disabled={isLoading}
                 required
                 autoComplete="current-password"
               />
@@ -566,9 +693,11 @@ function AdminDashboard() {
 
             <button
               type="submit"
-              className="w-full btn-primary py-4 rounded-full mt-4 font-semibold text-xs tracking-wider"
+              disabled={isLoading}
+              className="w-full btn-primary py-4 rounded-full mt-4 font-semibold text-xs tracking-wider flex justify-center items-center gap-2"
             >
-              Log In to Portal
+              {isLoading && <Loader2 className="w-4 h-4 animate-spin text-[#B89A5A]" />}
+              <span>{isLoading ? 'Authenticating...' : 'Log In to Portal'}</span>
             </button>
           </form>
         </div>
@@ -577,7 +706,7 @@ function AdminDashboard() {
   }
 
   // Safety check for loading values
-  if (!contact || !categories || !settings) {
+  if (isLoading && !contact) {
     return (
       <div className="min-h-screen bg-[#FAF6F0] flex items-center justify-center text-sans">
         <div className="flex flex-col items-center gap-3">
@@ -589,12 +718,8 @@ function AdminDashboard() {
   }
 
   const currentImages = gallery.filter(g => g.category === selectedCatName);
+  const isGalleryLimitReached = currentImages.length >= 8;
 
-  /* ─── Production detection ─────────────────────────────────────────────────── */
-  const isProduction = typeof window !== 'undefined' &&
-    !['localhost', '127.0.0.1'].includes(window.location.hostname);
-
-  /* ─── RENDER: Main Admin Panel ────────────────────────────────────────────── */
   const TABS = [
     { id: 'gallery', label: 'Gallery', icon: ImageIcon },
     { id: 'services', label: 'Services', icon: Crown },
@@ -605,27 +730,12 @@ function AdminDashboard() {
   return (
     <div className="min-h-screen bg-[#FAF6F0] text-sans flex flex-col md:flex-row relative text-[#6B6258] selection:bg-[#B89A5A]/20">
 
-      {/* Production Warning Banner */}
-      {isProduction && (
-        <div
-          role="alert"
-          className="fixed top-0 left-0 right-0 z-[9999] bg-amber-50 border-b border-amber-200 px-4 py-2.5 flex items-center justify-center gap-2 text-xs text-amber-800 font-medium"
-        >
-          <span aria-hidden="true">⚠️</span>
-          <span>
-            <strong>Read-only preview:</strong> This panel is running on the live server. Changes made here are <strong>not saved</strong>. To update content, run the server locally and push to GitHub.
-          </span>
-        </div>
-      )}
-
       {/* Toast Notification */}
       {notification.msg && (
         <div
           role="status"
           aria-live="polite"
-          className={`fixed bottom-20 md:bottom-10 left-1/2 -translate-x-1/2 md:left-auto md:translate-x-0 md:right-6 ${
-            notification.type === 'error' ? 'bg-red-700' : 'bg-[#0E3B2E]'
-          } border border-[#B89A5A]/30 text-[#FAF6F0] px-5 py-3.5 rounded-[18px] shadow-luxury z-50 flex items-center gap-3 text-xs tracking-wide animate-zoom-in whitespace-nowrap`}
+          className="fixed bottom-20 md:bottom-10 left-1/2 -translate-x-1/2 md:left-auto md:translate-x-0 md:right-6 bg-[#0E3B2E] border border-[#B89A5A]/30 text-[#FAF6F0] px-5 py-3.5 rounded-[18px] shadow-luxury z-50 flex items-center gap-3 text-xs tracking-wide animate-zoom-in whitespace-nowrap"
         >
           <span>{notification.msg}</span>
         </div>
@@ -683,7 +793,7 @@ function AdminDashboard() {
               return (
                 <button
                   key={tab.id}
-                  onClick={() => handleTabChange(tab.id)}
+                  onClick={() => setActiveTab(tab.id)}
                   aria-current={activeTab === tab.id ? 'page' : undefined}
                   className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-[18px] text-xs uppercase tracking-wider font-semibold transition-all ${
                     activeTab === tab.id
@@ -723,11 +833,12 @@ function AdminDashboard() {
         {/* Desktop header */}
         <header className="hidden md:flex border-b border-[#E7DCCF] py-5 px-8 items-center justify-between">
           <h1 className="text-serif text-2xl lg:text-3xl font-light text-[#4A3528] capitalize">
-            {activeTab === 'services' ? 'Services & Packages' : activeTab === 'gallery' ? 'Gallery Manager' : 'Contact Information'}
+            {activeTab === 'services' ? 'Services & Packages' : activeTab === 'gallery' ? 'Gallery Manager' : activeTab === 'contact' ? 'Contact Details' : 'Website Settings'}
           </h1>
-          {isDirty && (
-            <span className="text-[10px] text-[#B89A5A] uppercase tracking-wider font-semibold animate-pulse" aria-live="polite">
-              ● Unsaved changes
+          {isSaving && (
+            <span className="text-[10px] text-[#B89A5A] uppercase tracking-wider font-semibold animate-pulse flex items-center gap-1.5" aria-live="polite">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              <span>Saving changes...</span>
             </span>
           )}
         </header>
@@ -735,10 +846,13 @@ function AdminDashboard() {
         {/* Mobile page title */}
         <div className="md:hidden px-5 py-4 flex items-center justify-between">
           <h1 className="text-serif text-xl font-light text-[#4A3528] capitalize">
-            {activeTab === 'services' ? 'Services & Packages' : activeTab === 'gallery' ? 'Gallery' : 'Contact'}
+            {activeTab === 'services' ? 'Services & Packages' : activeTab === 'gallery' ? 'Gallery' : activeTab === 'contact' ? 'Contact' : 'Settings'}
           </h1>
-          {isDirty && (
-            <span className="text-[10px] text-[#B89A5A] uppercase tracking-wider font-semibold" aria-live="polite">● Unsaved</span>
+          {isSaving && (
+            <span className="text-[10px] text-[#B89A5A] uppercase tracking-wider font-semibold flex items-center gap-1" aria-live="polite">
+              <Loader2 className="w-3 h-3 animate-spin" />
+              <span>Saving...</span>
+            </span>
           )}
         </div>
 
@@ -890,12 +1004,24 @@ function AdminDashboard() {
 
               {/* Images Grid */}
               <div className="space-y-4 pt-4 border-t border-[#E7DCCF]/60">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                   <span className="text-[10px] uppercase tracking-wider font-bold text-[#B89A5A]">
                     Images in {selectedCatName ? `"${selectedCatName}"` : 'selected category'}
                   </span>
-                  <span className="text-xs text-[#6B6258]/60 font-light">Max 8 images per category</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-[#6B6258]/60 font-light">Max 8 images per category ({currentImages.length} / 8 uploaded)</span>
+                  </div>
                 </div>
+
+                {isGalleryLimitReached && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-start gap-3 text-xs text-amber-800" role="alert">
+                    <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-semibold">Maximum 8 images are allowed in each category.</p>
+                      <p className="mt-0.5 text-amber-700/90 font-light">To upload a new design, please delete one of the existing designs in this category first.</p>
+                    </div>
+                  </div>
+                )}
 
                 {selectedCatName ? (
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-6">
@@ -905,24 +1031,28 @@ function AdminDashboard() {
                       </div>
                     )}
 
-                    {currentImages.map((item) => (
+                    {currentImages.map((item, index) => (
                       <div
                         key={item.id}
-                        className="group relative bg-white border border-[#E7DCCF] rounded-2xl overflow-hidden shadow-sm hover:shadow-luxury-hover transition-all h-[210px] flex flex-col"
+                        draggable="true"
+                        onDragStart={(e) => handleDragStart(e, index)}
+                        onDragOver={handleDragOver}
+                        onDrop={(e) => handleDrop(e, index, currentImages)}
+                        className="group relative bg-white border border-[#E7DCCF] rounded-2xl overflow-hidden shadow-sm hover:shadow-luxury-hover transition-all h-[210px] flex flex-col cursor-grab active:cursor-grabbing"
                       >
                         {/* Image Preview */}
                         <div className="w-full h-[155px] relative overflow-hidden bg-white border-b border-[#E7DCCF]/60 flex items-center justify-center">
                           <img
                             src={item.image}
                             alt={item.title || 'Gallery image'}
-                            className="w-full h-full object-cover"
+                            className="w-full h-full object-cover pointer-events-none"
                           />
                           {/* Hover action overlay */}
                           <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
                             <button
                               type="button"
                               onClick={() => setEditingImage(item)}
-                              className="p-2 bg-white text-[#0E3B2E] rounded-full hover:scale-105 transition-all shadow-md font-semibold text-xs flex items-center gap-1"
+                              className="p-2 bg-white text-[#0E3B2E] rounded-full hover:scale-105 transition-all shadow-md font-semibold text-xs flex items-center gap-1 cursor-pointer"
                               aria-label={`Edit image: ${item.title || 'Untitled'}`}
                             >
                               <Edit className="w-4 h-4 text-[#B89A5A]" aria-hidden="true" />
@@ -931,7 +1061,7 @@ function AdminDashboard() {
                             <button
                               type="button"
                               onClick={() => handleDeleteImage(item)}
-                              className="p-2 bg-red-600 text-white rounded-full hover:scale-105 transition-all shadow-md"
+                              className="p-2 bg-red-600 text-white rounded-full hover:scale-105 transition-all shadow-md cursor-pointer"
                               aria-label={`Delete image: ${item.title || 'Untitled'}`}
                             >
                               <Trash2 className="w-4 h-4" />
@@ -940,15 +1070,15 @@ function AdminDashboard() {
                         </div>
 
                         {/* Card Info footer */}
-                        <div className="p-3.5 flex items-center justify-between mt-auto bg-white">
+                        <div className="p-3.5 flex items-center justify-between mt-auto bg-white pointer-events-none">
                           <span className="text-xs font-semibold truncate text-[#4A3528] max-w-[70%] text-left">
                             {item.title || 'Untitled Image'}
                           </span>
-                          <div className="flex items-center gap-1">
+                          <div className="flex items-center gap-1 pointer-events-auto">
                             <button
                               type="button"
                               onClick={() => setEditingImage(item)}
-                              className="p-1 text-[#6B6258] hover:text-[#0E3B2E] rounded"
+                              className="p-1 text-[#6B6258] hover:text-[#0E3B2E] rounded cursor-pointer"
                               aria-label={`Edit ${item.title || 'image'}`}
                             >
                               <Edit className="w-3.5 h-3.5" />
@@ -956,7 +1086,7 @@ function AdminDashboard() {
                             <button
                               type="button"
                               onClick={() => handleDeleteImage(item)}
-                              className="p-1 text-red-600 hover:text-red-800 rounded"
+                              className="p-1 text-red-600 hover:text-red-800 rounded cursor-pointer"
                               aria-label={`Delete ${item.title || 'image'}`}
                             >
                               <Trash2 className="w-3.5 h-3.5" />
@@ -967,11 +1097,11 @@ function AdminDashboard() {
                     ))}
 
                     {/* + Add Image Card */}
-                    {currentImages.length < 8 && (
+                    {!isGalleryLimitReached && (
                       <div className="border-2 border-dashed border-[#E7DCCF] hover:border-[#B89A5A] rounded-2xl flex flex-col items-center justify-center h-[210px] bg-white hover:bg-[#FAF6F0]/50 transition-all cursor-pointer relative">
                         <input
                           type="file"
-                          accept="image/jpeg,image/png,image/webp"
+                          accept="image/jpeg,image/png,image/webp,image/jpg"
                           id="image-grid-upload"
                           className="absolute inset-0 opacity-0 cursor-pointer"
                           onChange={(e) => handleImageSelect(e, (url) => handleAddImage(url))}
@@ -990,18 +1120,6 @@ function AdminDashboard() {
                 )}
               </div>
 
-              {/* SAVE GALLERY BUTTON */}
-              <div className="flex justify-end pt-8 border-t border-[#E7DCCF]">
-                <button
-                  onClick={handleSaveGallery}
-                  disabled={isSaving}
-                  className="btn-primary gap-2 px-10 py-4 flex items-center shadow-md w-full sm:w-auto text-xs font-semibold tracking-widest uppercase disabled:opacity-70"
-                >
-                  {isSaving ? <Loader2 className="w-4 h-4 animate-spin text-[#B89A5A]" aria-hidden="true" /> : <Save className="w-4 h-4 text-[#B89A5A]" aria-hidden="true" />}
-                  <span>{isSaving ? 'Saving…' : 'Save Changes'}</span>
-                </button>
-              </div>
-
             </div>
           )}
 
@@ -1010,7 +1128,7 @@ function AdminDashboard() {
             <div className="space-y-8 text-left">
               <div className="flex items-center justify-between border-b border-[#E7DCCF]/60 pb-3">
                 <span className="text-xs text-[#6B6258]/60 font-light">
-                  Click any package to edit details, manage price, or set features.
+                  Add, update icon, feature highlights, and order services. Changes persist immediately.
                 </span>
               </div>
 
@@ -1042,19 +1160,16 @@ function AdminDashboard() {
                         )}
                       </div>
 
-                      {/* Name and Price */}
+                      {/* Name */}
                       <div className="text-left mb-2">
                         <h4 className="text-serif text-xl font-light text-[#4A3528] group-hover:text-[#0E3B2E] transition-colors truncate">
                           {svc.name}
                         </h4>
-                        <span className="text-xs font-semibold text-[#B89A5A]">
-                          {svc.price || 'No Price Set'}
-                        </span>
                       </div>
 
                       {/* Short Description */}
-                      <p className="text-xs font-light text-[#6B6258] text-left line-clamp-2 leading-relaxed flex-grow">
-                        {svc.details || 'No description details provided.'}
+                      <p className="text-xs font-light text-[#6B6258] text-left line-clamp-3 leading-relaxed flex-grow">
+                        {svc.description || 'No description details provided.'}
                       </p>
 
                       {/* Reordering & Control Footer */}
@@ -1120,42 +1235,15 @@ function AdminDashboard() {
                 </div>
               </div>
 
-              {/* SAVE SERVICES BUTTON */}
-              <div className="flex justify-end pt-8 border-t border-[#E7DCCF]">
-                <button
-                  onClick={handleSaveServices}
-                  disabled={isSaving}
-                  className="btn-primary gap-2 px-10 py-4 flex items-center shadow-md w-full sm:w-auto text-xs font-semibold tracking-widest uppercase disabled:opacity-70"
-                >
-                  {isSaving ? <Loader2 className="w-4 h-4 animate-spin text-[#B89A5A]" aria-hidden="true" /> : <Save className="w-4 h-4 text-[#B89A5A]" aria-hidden="true" />}
-                  <span>{isSaving ? 'Saving…' : 'Save Changes'}</span>
-                </button>
-              </div>
-
             </div>
           )}
 
           {/* TAB: CONTACT INFORMATION */}
           {activeTab === 'contact' && (
             <div className="space-y-6">
-
               <div className="max-w-xl mx-auto space-y-6 text-left">
                 <div className="bg-white border border-[#E7DCCF] rounded-3xl p-8 space-y-6 shadow-sm">
-                  {/* Business Name */}
-                  <div>
-                    <label htmlFor="contact-business-name" className="text-[10px] uppercase tracking-wider font-semibold text-[#6B6258] block mb-2">
-                      Business Name
-                    </label>
-                    <input
-                      id="contact-business-name"
-                      type="text"
-                      value={contact.businessName || ''}
-                      onChange={(e) => setContact({ ...contact, businessName: e.target.value })}
-                      className="w-full rounded-xl border border-[#E7DCCF] bg-[#FAF6F0] p-3.5 text-sm focus:outline-none focus:border-[#B89A5A] text-[#4A3528]"
-                      placeholder="Stained Blooms"
-                    />
-                  </div>
-
+                  
                   {/* Instagram Link */}
                   <div>
                     <label htmlFor="contact-instagram" className="text-[10px] uppercase tracking-wider font-semibold text-[#6B6258] block mb-2">
@@ -1166,6 +1254,7 @@ function AdminDashboard() {
                       type="url"
                       value={contact.instagramUrl || ''}
                       onChange={(e) => setContact({ ...contact, instagramUrl: e.target.value })}
+                      onBlur={() => triggerContactAutoSave(contact)}
                       className="w-full rounded-xl border border-[#E7DCCF] bg-[#FAF6F0] p-3.5 text-sm focus:outline-none focus:border-[#B89A5A] text-[#4A3528]"
                       placeholder="https://instagram.com/stainedblooms"
                     />
@@ -1181,6 +1270,7 @@ function AdminDashboard() {
                       type="tel"
                       value={contact.whatsappNumber || ''}
                       onChange={(e) => setContact({ ...contact, whatsappNumber: e.target.value })}
+                      onBlur={() => triggerContactAutoSave(contact)}
                       className="w-full rounded-xl border border-[#E7DCCF] bg-[#FAF6F0] p-3.5 text-sm focus:outline-none focus:border-[#B89A5A] text-[#4A3528]"
                       placeholder="+911234567890"
                     />
@@ -1196,38 +1286,9 @@ function AdminDashboard() {
                       type="email"
                       value={contact.emailAddress || ''}
                       onChange={(e) => setContact({ ...contact, emailAddress: e.target.value })}
+                      onBlur={() => triggerContactAutoSave(contact)}
                       className="w-full rounded-xl border border-[#E7DCCF] bg-[#FAF6F0] p-3.5 text-sm focus:outline-none focus:border-[#B89A5A] text-[#4A3528]"
                       placeholder="inquiry@stainedblooms.com"
-                    />
-                  </div>
-
-                  {/* Business Address */}
-                  <div>
-                    <label htmlFor="contact-address" className="text-[10px] uppercase tracking-wider font-semibold text-[#6B6258] block mb-2">
-                      Business Address / Location
-                    </label>
-                    <input
-                      id="contact-address"
-                      type="text"
-                      value={contact.businessAddress || ''}
-                      onChange={(e) => setContact({ ...contact, businessAddress: e.target.value })}
-                      className="w-full rounded-xl border border-[#E7DCCF] bg-[#FAF6F0] p-3.5 text-sm focus:outline-none focus:border-[#B89A5A] text-[#4A3528]"
-                      placeholder="Kerala, India"
-                    />
-                  </div>
-
-                  {/* Business Hours */}
-                  <div>
-                    <label htmlFor="contact-hours" className="text-[10px] uppercase tracking-wider font-semibold text-[#6B6258] block mb-2">
-                      Business Hours
-                    </label>
-                    <input
-                      id="contact-hours"
-                      type="text"
-                      value={contact.businessHours || ''}
-                      onChange={(e) => setContact({ ...contact, businessHours: e.target.value })}
-                      className="w-full rounded-xl border border-[#E7DCCF] bg-[#FAF6F0] p-3.5 text-sm focus:outline-none focus:border-[#B89A5A] text-[#4A3528]"
-                      placeholder="10:00 AM - 07:00 PM (By Appointment Only)"
                     />
                   </div>
 
@@ -1241,6 +1302,7 @@ function AdminDashboard() {
                       type="text"
                       value={contact.ctaText || ''}
                       onChange={(e) => setContact({ ...contact, ctaText: e.target.value })}
+                      onBlur={() => triggerContactAutoSave(contact)}
                       className="w-full rounded-xl border border-[#E7DCCF] bg-[#FAF6F0] p-3.5 text-sm focus:outline-none focus:border-[#B89A5A] text-[#4A3528]"
                       placeholder="DM on Instagram"
                     />
@@ -1248,19 +1310,302 @@ function AdminDashboard() {
                   </div>
                 </div>
 
-                {/* SAVE CONTACT BUTTON */}
-                <div className="flex justify-end pt-2">
-                  <button
-                    onClick={handleSaveContact}
-                    disabled={isSaving}
-                    className="btn-primary gap-2 px-10 py-4 flex items-center shadow-md w-full sm:w-auto text-xs font-semibold tracking-widest uppercase disabled:opacity-70"
-                  >
-                    {isSaving ? <Loader2 className="w-4 h-4 animate-spin text-[#B89A5A]" aria-hidden="true" /> : <Save className="w-4 h-4 text-[#B89A5A]" aria-hidden="true" />}
-                    <span>{isSaving ? 'Saving…' : 'Save Changes'}</span>
-                  </button>
+                <div className="text-center">
+                  <span className="text-[10px] text-[#B89A5A] uppercase tracking-widest font-semibold">
+                    ⚡ Changes save automatically on field exit
+                  </span>
                 </div>
               </div>
+            </div>
+          )}
 
+          {/* TAB: WEBSITE SETTINGS */}
+          {activeTab === 'settings' && (
+            <div className="space-y-6 text-left">
+              <div className="max-w-2xl mx-auto space-y-6">
+                
+                {/* Branding Core Settings */}
+                <div className="bg-white border border-[#E7DCCF] rounded-3xl p-8 space-y-6 shadow-sm">
+                  <h3 className="text-serif text-xl font-medium text-[#4A3528] border-b border-[#E7DCCF]/60 pb-3">Branding & Layout</h3>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* Website Name */}
+                    <div>
+                      <label htmlFor="setting-web-name" className="text-[10px] uppercase tracking-wider font-semibold text-[#6B6258] block mb-2">
+                        Website Name
+                      </label>
+                      <input
+                        id="setting-web-name"
+                        type="text"
+                        value={settings.websiteName || ''}
+                        onChange={(e) => setSettings({ ...settings, websiteName: e.target.value })}
+                        onBlur={() => triggerSettingsAutoSave({ ...settings, websiteName: settings.websiteName }, null)}
+                        className="w-full rounded-xl border border-[#E7DCCF] bg-[#FAF6F0] p-3.5 text-sm focus:outline-none focus:border-[#B89A5A] text-[#4A3528]"
+                        placeholder="Stained Blooms"
+                      />
+                    </div>
+
+                    {/* Logo Text */}
+                    <div>
+                      <label htmlFor="setting-logo-text" className="text-[10px] uppercase tracking-wider font-semibold text-[#6B6258] block mb-2">
+                        Logo Brand Text
+                      </label>
+                      <input
+                        id="setting-logo-text"
+                        type="text"
+                        value={settings.logoText || ''}
+                        onChange={(e) => setSettings({ ...settings, logoText: e.target.value })}
+                        onBlur={() => triggerSettingsAutoSave({ ...settings, logoText: settings.logoText }, null)}
+                        className="w-full rounded-xl border border-[#E7DCCF] bg-[#FAF6F0] p-3.5 text-sm focus:outline-none focus:border-[#B89A5A] text-[#4A3528]"
+                        placeholder="Stained Blooms"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Logo and Favicon uploads */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-4">
+                    
+                    {/* Logo Image */}
+                    <div className="flex flex-col items-center p-4 border border-[#E7DCCF] rounded-2xl bg-[#FAF6F0]/30">
+                      <span className="text-[10px] uppercase tracking-wider font-semibold text-[#6B6258] mb-3 align-self-start">Logo Image</span>
+                      <div className="w-20 h-20 rounded-xl overflow-hidden border border-[#E7DCCF] bg-white flex items-center justify-center mb-4">
+                        {settings.logo ? (
+                          <img src={settings.logo} alt="Logo" className="w-full h-full object-contain" />
+                        ) : (
+                          <ImageIcon className="w-8 h-8 text-[#B89A5A]/40" />
+                        )}
+                      </div>
+                      <div className="relative">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          id="logo-image-file"
+                          className="hidden"
+                          onChange={(e) => handleImageSelect(e, async (url) => {
+                            const newSettings = { ...settings, logo: url };
+                            await triggerSettingsAutoSave(newSettings, null);
+                          })}
+                        />
+                        <label htmlFor="logo-image-file" className="btn-outline px-4 py-2 text-[9px] uppercase tracking-widest font-bold cursor-pointer">
+                          Upload Logo
+                        </label>
+                      </div>
+                    </div>
+
+                    {/* Favicon Image */}
+                    <div className="flex flex-col items-center p-4 border border-[#E7DCCF] rounded-2xl bg-[#FAF6F0]/30">
+                      <span className="text-[10px] uppercase tracking-wider font-semibold text-[#6B6258] mb-3 align-self-start">Favicon (Browser Tab Icon)</span>
+                      <div className="w-20 h-20 rounded-xl overflow-hidden border border-[#E7DCCF] bg-white flex items-center justify-center mb-4">
+                        {settings.favicon ? (
+                          <img src={settings.favicon} alt="Favicon" className="w-10 h-10 object-contain" />
+                        ) : (
+                          <ImageIcon className="w-8 h-8 text-[#B89A5A]/40" />
+                        )}
+                      </div>
+                      <div className="relative">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          id="favicon-image-file"
+                          className="hidden"
+                          onChange={(e) => handleImageSelect(e, async (url) => {
+                            const newSettings = { ...settings, favicon: url };
+                            await triggerSettingsAutoSave(newSettings, null);
+                          })}
+                        />
+                        <label htmlFor="favicon-image-file" className="btn-outline px-4 py-2 text-[9px] uppercase tracking-widest font-bold cursor-pointer">
+                          Upload Favicon
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Footer Text */}
+                  <div>
+                    <label htmlFor="setting-footer" className="text-[10px] uppercase tracking-wider font-semibold text-[#6B6258] block mb-2">
+                      Footer Text
+                    </label>
+                    <input
+                      id="setting-footer"
+                      type="text"
+                      value={settings.footerText || ''}
+                      onChange={(e) => setSettings({ ...settings, footerText: e.target.value })}
+                      onBlur={() => triggerSettingsAutoSave({ ...settings, footerText: settings.footerText }, null)}
+                      className="w-full rounded-xl border border-[#E7DCCF] bg-[#FAF6F0] p-3.5 text-sm focus:outline-none focus:border-[#B89A5A] text-[#4A3528]"
+                      placeholder="Footer copyright description"
+                    />
+                  </div>
+                </div>
+
+                {/* Hero Configuration Settings */}
+                <div className="bg-white border border-[#E7DCCF] rounded-3xl p-8 space-y-6 shadow-sm">
+                  <h3 className="text-serif text-xl font-medium text-[#4A3528] border-b border-[#E7DCCF]/60 pb-3">Hero Section Banner</h3>
+                  
+                  {/* Hero Title */}
+                  <div>
+                    <label htmlFor="setting-hero-title" className="text-[10px] uppercase tracking-wider font-semibold text-[#6B6258] block mb-2">
+                      Hero Title
+                    </label>
+                    <textarea
+                      id="setting-hero-title"
+                      rows="2"
+                      value={hero.heading || ''}
+                      onChange={(e) => setHero({ ...hero, heading: e.target.value })}
+                      onBlur={() => triggerSettingsAutoSave(null, { ...hero, heading: hero.heading })}
+                      className="w-full rounded-xl border border-[#E7DCCF] bg-[#FAF6F0] p-3.5 text-sm focus:outline-none focus:border-[#B89A5A] text-[#4A3528] resize-none"
+                      placeholder="Heading title (use \n for line breaks)"
+                    />
+                  </div>
+
+                  {/* Hero Subtitle */}
+                  <div>
+                    <label htmlFor="setting-hero-sub" className="text-[10px] uppercase tracking-wider font-semibold text-[#6B6258] block mb-2">
+                      Hero Subtitle / Description
+                    </label>
+                    <textarea
+                      id="setting-hero-sub"
+                      rows="3"
+                      value={hero.description || ''}
+                      onChange={(e) => setHero({ ...hero, description: e.target.value })}
+                      onBlur={() => triggerSettingsAutoSave(null, { ...hero, description: hero.description })}
+                      className="w-full rounded-xl border border-[#E7DCCF] bg-[#FAF6F0] p-3.5 text-sm focus:outline-none focus:border-[#B89A5A] text-[#4A3528] resize-none font-light leading-relaxed"
+                      placeholder="Brief descriptive tagline"
+                    />
+                  </div>
+
+                  {/* Hero Image upload & Preview */}
+                  <div className="flex flex-col sm:flex-row items-center gap-6 p-4 border border-[#E7DCCF] rounded-2xl bg-[#FAF6F0]/30">
+                    <div className="w-32 aspect-[3/4] rounded-xl overflow-hidden border border-[#E7DCCF] bg-white shrink-0">
+                      {hero.image ? (
+                        <img src={hero.image} alt="Hero banner" className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center"><ImageIcon className="w-8 h-8 text-[#B89A5A]/30" /></div>
+                      )}
+                    </div>
+                    <div className="flex-grow space-y-2 text-center sm:text-left">
+                      <span className="text-[10px] uppercase tracking-wider font-semibold text-[#6B6258] block">Hero Image File</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        id="hero-banner-file"
+                        className="hidden"
+                        onChange={(e) => handleImageSelect(e, async (url) => {
+                          const newHero = { ...hero, image: url };
+                          await triggerSettingsAutoSave(null, newHero);
+                        })}
+                      />
+                      <label htmlFor="hero-banner-file" className="btn-outline px-5 py-2.5 text-[9px] uppercase tracking-widest font-bold cursor-pointer inline-block">
+                        Upload Hero Image
+                      </label>
+                      <p className="text-[9px] text-[#6B6258]/60 font-light">Recommended portrait mode, under 10MB.</p>
+                    </div>
+                  </div>
+
+                  {/* CTA Buttons */}
+                  <div className="border-t border-[#E7DCCF]/60 pt-4 space-y-4">
+                    <span className="text-[10px] uppercase tracking-wider font-bold text-[#B89A5A] block">Call To Action Buttons</span>
+                    
+                    {/* Primary CTA */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label htmlFor="primary-cta-label" className="text-[9px] uppercase tracking-wider text-[#6B6258] block mb-1">Primary Button Label</label>
+                        <input
+                          id="primary-cta-label"
+                          type="text"
+                          value={hero.buttonText || ''}
+                          onChange={(e) => setHero({ ...hero, buttonText: e.target.value })}
+                          onBlur={() => triggerSettingsAutoSave(null, { ...hero, buttonText: hero.buttonText })}
+                          className="w-full rounded-lg border border-[#E7DCCF] bg-[#FAF6F0] p-3 text-xs focus:outline-none text-[#4A3528]"
+                          placeholder="Message on Instagram"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="primary-cta-url" className="text-[9px] uppercase tracking-wider text-[#6B6258] block mb-1">Primary Button URL</label>
+                        <input
+                          id="primary-cta-url"
+                          type="text"
+                          value={hero.buttonUrl || ''}
+                          onChange={(e) => setHero({ ...hero, buttonUrl: e.target.value })}
+                          onBlur={() => triggerSettingsAutoSave(null, { ...hero, buttonUrl: hero.buttonUrl })}
+                          className="w-full rounded-lg border border-[#E7DCCF] bg-[#FAF6F0] p-3 text-xs focus:outline-none text-[#4A3528]"
+                          placeholder="https://instagram.com"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Secondary CTA */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label htmlFor="secondary-cta-label" className="text-[9px] uppercase tracking-wider text-[#6B6258] block mb-1">Secondary Button Label</label>
+                        <input
+                          id="secondary-cta-label"
+                          type="text"
+                          value={hero.secondaryButtonText || ''}
+                          onChange={(e) => setHero({ ...hero, secondaryButtonText: e.target.value })}
+                          onBlur={() => triggerSettingsAutoSave(null, { ...hero, secondaryButtonText: hero.secondaryButtonText })}
+                          className="w-full rounded-lg border border-[#E7DCCF] bg-[#FAF6F0] p-3 text-xs focus:outline-none text-[#4A3528]"
+                          placeholder="View Gallery"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="secondary-cta-url" className="text-[9px] uppercase tracking-wider text-[#6B6258] block mb-1">Secondary Button URL</label>
+                        <input
+                          id="secondary-cta-url"
+                          type="text"
+                          value={hero.secondaryButtonUrl || ''}
+                          onChange={(e) => setHero({ ...hero, secondaryButtonUrl: e.target.value })}
+                          onBlur={() => triggerSettingsAutoSave(null, { ...hero, secondaryButtonUrl: hero.secondaryButtonUrl })}
+                          className="w-full rounded-lg border border-[#E7DCCF] bg-[#FAF6F0] p-3 text-xs focus:outline-none text-[#4A3528]"
+                          placeholder="#gallery"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* SEO and Metadata settings */}
+                <div className="bg-white border border-[#E7DCCF] rounded-3xl p-8 space-y-6 shadow-sm">
+                  <h3 className="text-serif text-xl font-medium text-[#4A3528] border-b border-[#E7DCCF]/60 pb-3">Search Engine Optimization (SEO)</h3>
+                  
+                  {/* Meta Title */}
+                  <div>
+                    <label htmlFor="seo-title" className="text-[10px] uppercase tracking-wider font-semibold text-[#6B6258] block mb-2">
+                      Browser Tab Title (Meta Title)
+                    </label>
+                    <input
+                      id="seo-title"
+                      type="text"
+                      value={settings.metaTitle || ''}
+                      onChange={(e) => setSettings({ ...settings, metaTitle: e.target.value })}
+                      onBlur={() => triggerSettingsAutoSave({ ...settings, metaTitle: settings.metaTitle }, null)}
+                      className="w-full rounded-xl border border-[#E7DCCF] bg-[#FAF6F0] p-3.5 text-sm focus:outline-none focus:border-[#B89A5A] text-[#4A3528]"
+                      placeholder="Stained Blooms — Luxury Bridal Mehendi"
+                    />
+                  </div>
+
+                  {/* Meta Description */}
+                  <div>
+                    <label htmlFor="seo-desc" className="text-[10px] uppercase tracking-wider font-semibold text-[#6B6258] block mb-2">
+                      Search Description (Meta Description)
+                    </label>
+                    <textarea
+                      id="seo-desc"
+                      rows="3"
+                      value={settings.metaDescription || ''}
+                      onChange={(e) => setSettings({ ...settings, metaDescription: e.target.value })}
+                      onBlur={() => triggerSettingsAutoSave({ ...settings, metaDescription: settings.metaDescription }, null)}
+                      className="w-full rounded-xl border border-[#E7DCCF] bg-[#FAF6F0] p-3.5 text-sm focus:outline-none focus:border-[#B89A5A] text-[#4A3528] resize-none font-light leading-relaxed"
+                      placeholder="Enter search snippet details..."
+                    />
+                  </div>
+                </div>
+
+                <div className="text-center pb-8">
+                  <span className="text-[10px] text-[#B89A5A] uppercase tracking-widest font-semibold">
+                    ⚡ Changes save automatically on field exit
+                  </span>
+                </div>
+              </div>
             </div>
           )}
 
@@ -1274,7 +1619,7 @@ function AdminDashboard() {
           return (
             <button
               key={tab.id}
-              onClick={() => handleTabChange(tab.id)}
+              onClick={() => setActiveTab(tab.id)}
               aria-current={activeTab === tab.id ? 'page' : undefined}
               className={`flex flex-col items-center justify-center flex-1 py-2 rounded-2xl transition-all ${
                 activeTab === tab.id
@@ -1307,7 +1652,7 @@ function AdminDashboard() {
               <h3 className="text-serif text-2xl font-light text-[#4A3528]">Edit Image Details</h3>
               <button
                 onClick={() => setEditingImage(null)}
-                className="p-1 rounded-full hover:bg-black/5 text-[#6B6258] focus:outline-none focus:ring-2 focus:ring-[#B89A5A]"
+                className="p-1 rounded-full hover:bg-black/5 text-[#6B6258] focus:outline-none focus:ring-2 focus:ring-[#B89A5A] cursor-pointer"
                 aria-label="Close edit image modal"
               >
                 <X className="w-5 h-5" />
@@ -1326,11 +1671,16 @@ function AdminDashboard() {
               <div className="flex-grow space-y-2">
                 <input
                   type="file"
-                  accept="image/jpeg,image/png,image/webp"
+                  accept="image/jpeg,image/png,image/webp,image/jpg"
                   id="modal-change-image"
                   className="hidden"
-                  onChange={(e) => handleImageSelect(e, (url) => setEditingImage({ ...editingImage, image: url }))}
-                  aria-label="Replace image file"
+                  onChange={(e) => handleImageSelect(e, async (url) => {
+                    // Try to delete old storage file if replacing
+                    if (editingImage.image) {
+                      await deleteUploadedImage(editingImage.image);
+                    }
+                    setEditingImage({ ...editingImage, image: url });
+                  })}
                 />
                 <label
                   htmlFor="modal-change-image"
@@ -1338,7 +1688,7 @@ function AdminDashboard() {
                 >
                   Change Image
                 </label>
-                <p className="text-[9px] text-[#6B6258]/60 font-light">Max size 2MB (JPEG, PNG, WEBP)</p>
+                <p className="text-[9px] text-[#6B6258]/60 font-light">Max size 10MB (JPEG, PNG, WEBP)</p>
               </div>
             </div>
 
@@ -1380,14 +1730,23 @@ function AdminDashboard() {
                   showConfirm(
                     'Delete Image?',
                     'Are you sure you want to delete this image?',
-                    () => {
-                      deleteUploadedImage(editingImage.image);
-                      setGallery(gallery.filter(g => g.id !== editingImage.id));
-                      setEditingImage(null);
+                    async () => {
+                      setIsSaving(true);
+                      try {
+                        await deleteUploadedImage(editingImage.image);
+                        await deleteGalleryItem(editingImage.id);
+                        await loadData();
+                        setEditingImage(null);
+                        showNotification('✓ Image deleted.');
+                      } catch (err) {
+                        showAlert('Delete Failed', err.message);
+                      } finally {
+                        setIsSaving(false);
+                      }
                     }
                   );
                 }}
-                className="px-4 py-3 border border-red-200 hover:bg-red-50 text-red-700 text-xs font-semibold rounded-full uppercase tracking-wider flex items-center gap-1.5 focus:outline-none focus:ring-2 focus:ring-red-400"
+                className="px-4 py-3 border border-red-200 hover:bg-red-50 text-red-700 text-xs font-semibold rounded-full uppercase tracking-wider flex items-center gap-1.5 focus:outline-none focus:ring-2 focus:ring-red-400 cursor-pointer"
               >
                 <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
                 <span>Delete Image</span>
@@ -1397,17 +1756,14 @@ function AdminDashboard() {
                 <button
                   type="button"
                   onClick={() => setEditingImage(null)}
-                  className="px-5 py-3 border border-[#E7DCCF] hover:bg-black/5 text-[#6B6258] text-xs font-semibold rounded-full uppercase tracking-wider focus:outline-none focus:ring-2 focus:ring-[#B89A5A]"
+                  className="px-5 py-3 border border-[#E7DCCF] hover:bg-black/5 text-[#6B6258] text-xs font-semibold rounded-full uppercase tracking-wider focus:outline-none focus:ring-2 focus:ring-[#B89A5A] cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    setGallery(gallery.map(g => g.id === editingImage.id ? editingImage : g));
-                    setEditingImage(null);
-                  }}
-                  className="px-6 py-3 bg-[#0E3B2E] text-white hover:bg-[#0A3025] text-xs font-semibold rounded-full uppercase tracking-wider shadow-md focus:outline-none focus:ring-2 focus:ring-[#B89A5A]"
+                  onClick={handleSaveImageDetails}
+                  className="px-6 py-3 bg-[#0E3B2E] text-white hover:bg-[#0A3025] text-xs font-semibold rounded-full uppercase tracking-wider shadow-md focus:outline-none focus:ring-2 focus:ring-[#B89A5A] cursor-pointer"
                 >
                   Save
                 </button>
@@ -1435,7 +1791,7 @@ function AdminDashboard() {
               <h3 className="text-serif text-2xl font-light text-[#4A3528]">Edit Package</h3>
               <button
                 onClick={() => setEditingSvc(null)}
-                className="p-1 rounded-full hover:bg-black/5 text-[#6B6258] focus:outline-none focus:ring-2 focus:ring-[#B89A5A]"
+                className="p-1 rounded-full hover:bg-black/5 text-[#6B6258] focus:outline-none focus:ring-2 focus:ring-[#B89A5A] cursor-pointer"
                 aria-label="Close edit package modal"
               >
                 <X className="w-5 h-5" />
@@ -1457,46 +1813,17 @@ function AdminDashboard() {
               />
             </div>
 
-            {/* Price */}
-            <div>
-              <label htmlFor="svc-price" className="text-[10px] uppercase tracking-wider font-semibold text-[#6B6258] block mb-2">
-                Price
-              </label>
-              <input
-                id="svc-price"
-                type="text"
-                value={editingSvc.price || ''}
-                onChange={(e) => setEditingSvc({ ...editingSvc, price: e.target.value })}
-                placeholder="e.g. ₹1,500 or Custom pricing"
-                className="w-full rounded-xl border border-[#E7DCCF] bg-[#FAF6F0] p-3.5 text-sm focus:outline-none focus:border-[#B89A5A] text-[#4A3528]"
-              />
-            </div>
-
-            {/* Short Description */}
+            {/* Description Details */}
             <div>
               <label htmlFor="svc-description" className="text-[10px] uppercase tracking-wider font-semibold text-[#6B6258] block mb-2">
-                Short Description
-              </label>
-              <input
-                id="svc-description"
-                type="text"
-                value={editingSvc.description || ''}
-                onChange={(e) => setEditingSvc({ ...editingSvc, description: e.target.value })}
-                placeholder="e.g. ELEGANT & MINIMAL"
-                className="w-full rounded-xl border border-[#E7DCCF] bg-[#FAF6F0] p-3.5 text-sm focus:outline-none focus:border-[#B89A5A] text-[#4A3528] uppercase tracking-widest"
-              />
-            </div>
-
-            {/* Details */}
-            <div>
-              <label htmlFor="svc-details" className="text-[10px] uppercase tracking-wider font-semibold text-[#6B6258] block mb-2">
-                Full Details
+                Service Description
               </label>
               <textarea
-                id="svc-details"
-                rows="3"
-                value={editingSvc.details}
-                onChange={(e) => setEditingSvc({ ...editingSvc, details: e.target.value })}
+                id="svc-description"
+                rows="4"
+                value={editingSvc.description || ''}
+                onChange={(e) => setEditingSvc({ ...editingSvc, description: e.target.value })}
+                placeholder="Details about motifs, pricing, trails, etc."
                 className="w-full rounded-xl border border-[#E7DCCF] bg-[#FAF6F0] p-3.5 text-sm focus:outline-none focus:border-[#B89A5A] text-[#4A3528] font-light leading-relaxed resize-none"
               />
             </div>
@@ -1516,7 +1843,7 @@ function AdminDashboard() {
                       onClick={() => setEditingSvc({ ...editingSvc, icon: key })}
                       aria-pressed={editingSvc.icon === key}
                       aria-label={`Select ${key} icon`}
-                      className={`p-2.5 rounded-xl border transition-all ${
+                      className={`p-2.5 rounded-xl border transition-all cursor-pointer ${
                         editingSvc.icon === key
                           ? 'border-[#B89A5A] bg-[#0E3B2E] text-white shadow-sm'
                           : 'border-[#E7DCCF] hover:bg-white text-[#6B6258]'
@@ -1556,13 +1883,22 @@ function AdminDashboard() {
                   showConfirm(
                     'Delete Package?',
                     'Are you sure you want to delete this package?',
-                    () => {
-                      setServices(services.filter(s => s.id !== editingSvc.id));
-                      setEditingSvc(null);
+                    async () => {
+                      setIsSaving(true);
+                      try {
+                        await deleteService(editingSvc.id);
+                        await loadData();
+                        setEditingSvc(null);
+                        showNotification('✓ Service package deleted.');
+                      } catch (err) {
+                        showAlert('Delete Failed', err.message);
+                      } finally {
+                        setIsSaving(false);
+                      }
                     }
                   );
                 }}
-                className="px-4 py-3 border border-red-200 hover:bg-red-50 text-red-700 text-xs font-semibold rounded-full uppercase tracking-wider flex items-center gap-1.5 focus:outline-none focus:ring-2 focus:ring-red-400"
+                className="px-4 py-3 border border-red-200 hover:bg-red-50 text-red-700 text-xs font-semibold rounded-full uppercase tracking-wider flex items-center gap-1.5 focus:outline-none focus:ring-2 focus:ring-red-400 cursor-pointer"
               >
                 <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
                 <span>Delete Package</span>
@@ -1572,27 +1908,14 @@ function AdminDashboard() {
                 <button
                   type="button"
                   onClick={() => setEditingSvc(null)}
-                  className="px-5 py-3 border border-[#E7DCCF] hover:bg-black/5 text-[#6B6258] text-xs font-semibold rounded-full uppercase tracking-wider focus:outline-none focus:ring-2 focus:ring-[#B89A5A]"
+                  className="px-5 py-3 border border-[#E7DCCF] hover:bg-black/5 text-[#6B6258] text-xs font-semibold rounded-full uppercase tracking-wider focus:outline-none focus:ring-2 focus:ring-[#B89A5A] cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    if (!editingSvc.name?.trim()) {
-                      showAlert('Validation Error', 'Package name cannot be empty.');
-                      return;
-                    }
-                    let updatedServices = services.map(s => {
-                      if (s.id === editingSvc.id) {
-                        return editingSvc;
-                      }
-                      return editingSvc.isFeatured ? { ...s, isFeatured: false } : s;
-                    });
-                    setServices(updatedServices);
-                    setEditingSvc(null);
-                  }}
-                  className="px-6 py-3 bg-[#0E3B2E] text-white hover:bg-[#0A3025] text-xs font-semibold rounded-full uppercase tracking-wider shadow-md focus:outline-none focus:ring-2 focus:ring-[#B89A5A]"
+                  onClick={handleSaveServiceDetails}
+                  className="px-6 py-3 bg-[#0E3B2E] text-white hover:bg-[#0A3025] text-xs font-semibold rounded-full uppercase tracking-wider shadow-md focus:outline-none focus:ring-2 focus:ring-[#B89A5A] cursor-pointer"
                 >
                   Save
                 </button>
@@ -1637,7 +1960,7 @@ function AdminDashboard() {
                     if (confirmModal.onConfirm) confirmModal.onConfirm();
                     setConfirmModal(prev => ({ ...prev, isOpen: false }));
                   }}
-                  className="w-full py-3.5 bg-[#4A3528] hover:bg-[#3A291F] text-white text-xs font-semibold rounded-full uppercase tracking-[0.1em] transition-colors shadow-md focus:outline-none focus:ring-2 focus:ring-[#4A3528]"
+                  className="w-full py-3.5 bg-[#4A3528] hover:bg-[#3A291F] text-white text-xs font-semibold rounded-full uppercase tracking-[0.1em] transition-colors shadow-md focus:outline-none focus:ring-2 focus:ring-[#4A3528] cursor-pointer"
                 >
                   {confirmModal.confirmText}
                 </button>
@@ -1646,7 +1969,7 @@ function AdminDashboard() {
                 <button
                   type="button"
                   onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
-                  className="w-full py-3.5 bg-[#0E3B2E] hover:bg-[#0A3025] text-white text-xs font-semibold rounded-full uppercase tracking-[0.1em] transition-colors shadow-md focus:outline-none focus:ring-2 focus:ring-[#0E3B2E]"
+                  className="w-full py-3.5 bg-[#0E3B2E] hover:bg-[#0A3025] text-white text-xs font-semibold rounded-full uppercase tracking-[0.1em] transition-colors shadow-md focus:outline-none focus:ring-2 focus:ring-[#0E3B2E] cursor-pointer"
                 >
                   OK
                 </button>
@@ -1655,7 +1978,7 @@ function AdminDashboard() {
                 <button
                   type="button"
                   onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
-                  className="w-full py-3.5 border border-[#E7DCCF] hover:bg-white text-[#4A3528] text-xs font-semibold rounded-full uppercase tracking-[0.1em] transition-colors focus:outline-none focus:ring-2 focus:ring-[#E7DCCF]"
+                  className="w-full py-3.5 border border-[#E7DCCF] hover:bg-white text-[#4A3528] text-xs font-semibold rounded-full uppercase tracking-[0.1em] transition-colors focus:outline-none focus:ring-2 focus:ring-[#E7DCCF] cursor-pointer"
                 >
                   {confirmModal.cancelText}
                 </button>

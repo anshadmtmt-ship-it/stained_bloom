@@ -5,7 +5,6 @@ import { getAllCMSData, subscribeToCMSUpdates } from './cmsHelper.js';
 import {
   Send,
   Mail,
-  MapPin,
   Menu,
   X,
   ChevronRight,
@@ -364,8 +363,32 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (cms.settings && cms.settings.metaTitle) {
-      document.title = cms.settings.metaTitle;
+    if (cms.settings) {
+      if (cms.settings.metaTitle) {
+        document.title = cms.settings.metaTitle;
+      }
+      if (cms.settings.metaDescription) {
+        const metaDesc = document.querySelector('meta[name="description"]');
+        if (metaDesc) {
+          metaDesc.setAttribute('content', cms.settings.metaDescription);
+        } else {
+          const meta = document.createElement('meta');
+          meta.name = 'description';
+          meta.content = cms.settings.metaDescription;
+          document.head.appendChild(meta);
+        }
+      }
+      if (cms.settings.favicon) {
+        const link = document.querySelector("link[rel*='icon']");
+        if (link) {
+          link.href = cms.settings.favicon;
+        } else {
+          const newLink = document.createElement('link');
+          newLink.rel = 'icon';
+          newLink.href = cms.settings.favicon;
+          document.head.appendChild(newLink);
+        }
+      }
     }
   }, [cms.settings]);
 
@@ -769,9 +792,6 @@ function App() {
                       isFeatured ? 'text-[#FAF6F0]' : 'text-[#4A3528] group-hover:text-[#0E3B2E]'
                     }`}>{service.name}</h3>
 
-                    {/* Description tag */}
-                    <span className="text-[8px] tracking-[0.18em] uppercase font-bold text-[#B89A5A] block mb-5">{service.description}</span>
-
                     {/* Decorative divider */}
                     <div className={`w-12 h-[1px] mb-6 transition-all duration-300 ${
                       isFeatured ? 'bg-[#B89A5A]/40' : 'bg-[#E8DDC7] group-hover:bg-[#B89A5A]/50'
@@ -1105,10 +1125,6 @@ function App() {
                   <Send className="w-4 h-4 text-[#B89A5A] shrink-0" aria-hidden="true" />
                   <span className="text-xs font-light tracking-wide">Chat on WhatsApp</span>
                 </a>
-                <div className="flex items-center gap-3 text-[#E8DDC7]/70 font-light tracking-wide">
-                  <MapPin className="w-4 h-4 text-[#B89A5A] shrink-0" aria-hidden="true" />
-                  <span className="text-xs font-light tracking-wide">{cms.contact.businessAddress}</span>
-                </div>
               </div>
             </div>
           </div>
