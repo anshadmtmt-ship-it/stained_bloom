@@ -107,6 +107,7 @@ function AdminDashboard() {
   const [notification, setNotification] = useState({ msg: '', type: 'success' });
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [connectionError, setConnectionError] = useState(null);
 
   // CMS state values
   const [services, setServices] = useState([]);
@@ -214,6 +215,7 @@ function AdminDashboard() {
 
   const loadData = async () => {
     setIsLoading(true);
+    setConnectionError(null);
     try {
       const [
         loadedCategories,
@@ -247,7 +249,7 @@ function AdminDashboard() {
       setHero(loadedHero || {});
     } catch (e) {
       console.error(e);
-      showAlert('Error', 'Failed to retrieve cloud CMS data.');
+      setConnectionError(e.message || 'CMS Connection Error: Failed to retrieve cloud CMS data.');
     } finally {
       setIsLoading(false);
     }
@@ -712,6 +714,37 @@ function AdminDashboard() {
         <div className="flex flex-col items-center gap-3">
           <div className="w-10 h-10 border-2 border-[#E7DCCF] border-t-[#B89A5A] rounded-full animate-spin" role="status" aria-label="Loading CMS data"></div>
           <p className="text-xs uppercase tracking-widest text-[#B89A5A]">Loading CMS Data…</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (connectionError) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-[#FAF6F0] p-6 text-center text-sans">
+        <div className="w-16 h-16 rounded-full bg-red-50 flex items-center justify-center mb-6 border border-red-100">
+          <AlertTriangle className="w-8 h-8 text-red-500" />
+        </div>
+        <h2 className="text-serif text-3xl font-light text-[#4A3528] mb-3">Connection Unavailable</h2>
+        <p className="text-sm font-light text-[#6B6258] max-w-md mb-8 leading-relaxed">
+          {connectionError}
+        </p>
+        <div className="flex gap-4">
+          <button
+            onClick={() => {
+              setIsAuthenticated(false);
+              setConnectionError(null);
+            }}
+            className="btn-outline px-8 py-3 rounded-full text-xs font-semibold uppercase tracking-wider cursor-pointer"
+          >
+            Go to Login
+          </button>
+          <button
+            onClick={loadData}
+            className="btn-primary px-8 py-3 rounded-full text-xs font-semibold uppercase tracking-wider cursor-pointer"
+          >
+            Retry Connection
+          </button>
         </div>
       </div>
     );

@@ -13,7 +13,8 @@ import {
   Feather,
   Flower,
   Crown,
-  MessageSquare
+  MessageSquare,
+  AlertTriangle
 } from 'lucide-react';
 
 // Custom brand SVGs because brand logos are removed from modern lucide-react
@@ -327,6 +328,7 @@ function App() {
   const [activeCategory, setActiveCategory] = useState('All');
 
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [cms, setCms] = useState({
     hero: {},
     services: [],
@@ -336,31 +338,33 @@ function App() {
     settings: {}
   });
 
-  useEffect(() => {
-    const loadCmsData = async () => {
-      try {
-        const data = await getAllCMSData();
-        if (data) {
-          setCms({
-            hero: data.hero || {},
-            services: data.services || [],
-            gallery: data.gallery || [],
-            categories: data.categories || [],
-            contact: data.contact || {},
-            settings: data.settings || {}
-          });
-        }
-        setLoading(false);
-      } catch (err) {
-        console.error('Failed to load CMS data', err);
-        setLoading(false);
+  const loadCmsData = useCallback(async () => {
+    setError(null);
+    try {
+      const data = await getAllCMSData();
+      if (data) {
+        setCms({
+          hero: data.hero || {},
+          services: data.services || [],
+          gallery: data.gallery || [],
+          categories: data.categories || [],
+          contact: data.contact || {},
+          settings: data.settings || {}
+        });
       }
-    };
+      setLoading(false);
+    } catch (err) {
+      console.error('Failed to load CMS data', err);
+      setError(err.message || 'CMS Connection Error: Failed to connect to Supabase.');
+      setLoading(false);
+    }
+  }, []);
 
+  useEffect(() => {
     loadCmsData();
     const unsubscribe = subscribeToCMSUpdates(loadCmsData);
     return unsubscribe;
-  }, []);
+  }, [loadCmsData]);
 
   useEffect(() => {
     if (cms.settings) {
@@ -443,6 +447,26 @@ function App() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#FAF6F0]">
         <div className="w-12 h-12 border-2 border-[#E7DCCF] border-t-[#B89A5A] rounded-full animate-spin" role="status" aria-label="Loading"></div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-[#FAF6F0] p-6 text-center text-sans">
+        <div className="w-16 h-16 rounded-full bg-red-50 flex items-center justify-center mb-6 border border-red-100">
+          <AlertTriangle className="w-8 h-8 text-red-500" />
+        </div>
+        <h2 className="text-serif text-3xl font-light text-[#4A3528] mb-3">Connection Unavailable</h2>
+        <p className="text-sm font-light text-[#6B6258] max-w-md mb-8 leading-relaxed">
+          {error}
+        </p>
+        <button
+          onClick={loadCmsData}
+          className="btn-primary px-8 py-3 rounded-full text-xs font-semibold uppercase tracking-wider cursor-pointer"
+        >
+          Retry Connection
+        </button>
       </div>
     );
   }

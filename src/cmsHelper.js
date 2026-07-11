@@ -4,11 +4,15 @@ import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  console.warn('Supabase URL or Anon Key is missing. Make sure environment variables VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are set.');
-}
+export const supabase = (supabaseUrl && supabaseAnonKey && supabaseUrl !== 'YOUR_SUPABASE_PROJECT_URL')
+  ? createClient(supabaseUrl, supabaseAnonKey)
+  : null;
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+function checkClient() {
+  if (!supabase) {
+    throw new Error('Supabase client is not initialized. Please ensure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are set correctly in your environment variables.');
+  }
+}
 
 // Helper to map DB contact row to UI object
 function mapContactRow(row) {
@@ -55,6 +59,7 @@ function mapSettingsRow(row) {
 // ─── READ OPERATIONS ──────────────────────────────────────────────────────────
 
 export async function getAllCMSData() {
+  checkClient();
   try {
     const [
       { data: wsData, error: wsErr },
@@ -114,6 +119,7 @@ export async function getAllCMSData() {
 }
 
 export async function getCMSData(key) {
+  checkClient();
   try {
     if (key === 'settings') {
       const { data, error } = await supabase.from('website_settings').select('*').single();
@@ -155,6 +161,7 @@ export async function getCMSData(key) {
 // ─── WRITE MUTATIONS (IMMEDIATE PERSISTENCE) ──────────────────────────────────
 
 export async function saveWebsiteSettings(settingsObj, heroObj) {
+  checkClient();
   try {
     const payload = {};
     if (settingsObj) {
@@ -190,6 +197,7 @@ export async function saveWebsiteSettings(settingsObj, heroObj) {
 }
 
 export async function saveContact(contactObj) {
+  checkClient();
   try {
     const payload = {
       instagram_url: contactObj.instagramUrl,
@@ -212,6 +220,7 @@ export async function saveContact(contactObj) {
 }
 
 export async function saveCategory(cat) {
+  checkClient();
   try {
     const payload = {
       name: cat.name,
@@ -236,6 +245,7 @@ export async function saveCategory(cat) {
 }
 
 export async function deleteCategory(catId) {
+  checkClient();
   try {
     const { error } = await supabase
       .from('categories')
@@ -251,6 +261,7 @@ export async function deleteCategory(catId) {
 }
 
 export async function saveCategoriesList(categoriesList) {
+  checkClient();
   try {
     const payloads = categoriesList.map((c, index) => ({
       id: c.id,
@@ -272,6 +283,7 @@ export async function saveCategoriesList(categoriesList) {
 }
 
 export async function saveService(svc) {
+  checkClient();
   try {
     const payload = {
       title: svc.name,
@@ -301,6 +313,7 @@ export async function saveService(svc) {
 }
 
 export async function deleteService(svcId) {
+  checkClient();
   try {
     const { error } = await supabase
       .from('services')
@@ -316,6 +329,7 @@ export async function deleteService(svcId) {
 }
 
 export async function saveServicesList(servicesList) {
+  checkClient();
   try {
     const payloads = servicesList.map((s, index) => ({
       id: s.id,
@@ -339,6 +353,7 @@ export async function saveServicesList(servicesList) {
 }
 
 export async function saveGalleryItem(item) {
+  checkClient();
   try {
     const payload = {
       category: item.category,
@@ -350,7 +365,6 @@ export async function saveGalleryItem(item) {
     };
     
     // Check if item has a valid numeric ID (existing item)
-    // Client generated temp timestamps are numbers but usually large (>10 digits)
     if (item.id && String(item.id).length < 12) {
       payload.id = Number(item.id);
     }
@@ -370,6 +384,7 @@ export async function saveGalleryItem(item) {
 }
 
 export async function deleteGalleryItem(itemId) {
+  checkClient();
   try {
     const { error } = await supabase
       .from('gallery')
@@ -385,6 +400,7 @@ export async function deleteGalleryItem(itemId) {
 }
 
 export async function saveGalleryList(galleryList) {
+  checkClient();
   try {
     const payloads = galleryList.map((g, index) => {
       const payload = {
@@ -416,6 +432,7 @@ export async function saveGalleryList(galleryList) {
 // ─── STORAGE OPERATIONS ────────────────────────────────────────────────────────
 
 export async function uploadImage(file) {
+  checkClient();
   // Validate type
   const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'];
   if (!allowedTypes.includes(file.type.toLowerCase())) {
@@ -453,12 +470,11 @@ export async function uploadImage(file) {
 }
 
 export async function deleteUploadedImage(imageUrl) {
+  checkClient();
   if (!imageUrl) return;
-  // Verify that it is a URL from our Supabase project storage
   if (!imageUrl.includes('.supabase.co/storage/v1/object/public/images/')) return;
 
   try {
-    // Extract file path after "images/"
     const pathParts = imageUrl.split('/public/images/');
     if (pathParts.length < 2) return;
     const filepath = decodeURIComponent(pathParts[1]);
@@ -469,7 +485,6 @@ export async function deleteUploadedImage(imageUrl) {
 
     if (error) throw error;
   } catch (error) {
-    // Non-critical log, don't crash
     console.warn('Could not delete storage file:', error.message);
   }
 }
@@ -477,8 +492,8 @@ export async function deleteUploadedImage(imageUrl) {
 // ─── AUTHENTICATION ────────────────────────────────────────────────────────────
 
 export async function loginAdmin(usernameOrEmail, password) {
+  checkClient();
   try {
-    // Standardize to email
     let email = usernameOrEmail;
     if (!usernameOrEmail.includes('@')) {
       email = `${usernameOrEmail}@stainedblooms.com`;
@@ -504,6 +519,7 @@ export async function loginAdmin(usernameOrEmail, password) {
 }
 
 export async function logoutAdmin() {
+  checkClient();
   try {
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
@@ -515,7 +531,7 @@ export async function logoutAdmin() {
 // ─── REALTIME SYNC ─────────────────────────────────────────────────────────────
 
 export function subscribeToCMSUpdates(callback) {
-  // Subscribe to changes on all content tables
+  checkClient();
   const channel = supabase
     .channel('cms-all-changes')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'website_settings' }, () => callback())
@@ -525,7 +541,6 @@ export function subscribeToCMSUpdates(callback) {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'gallery' }, () => callback())
     .subscribe();
 
-  // Return unsubscribe cleanup handler
   return () => {
     supabase.removeChannel(channel);
   };
