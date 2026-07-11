@@ -10,16 +10,41 @@ const GALLERY_IMAGE_LIMIT = 8;
  * Used by AdminDashboard.jsx to reject non-admin authenticated users.
  */
 export async function checkIsAdmin(userId) {
-  if (!userId) return false;
+  if (!userId) {
+    console.error('[checkIsAdmin] No userId provided to check.');
+    return false;
+  }
+  
   try {
+    console.log('[checkIsAdmin] Verifying admin access for auth.uid:', userId);
+    
+    // We use maybeSingle() because single() throws PGRST116 if no rows match,
+    // which happens if the user isn't an admin.
     const { data, error } = await supabase
       .from('admin_users')
       .select('id')
       .eq('id', userId)
-      .single();
-    if (error) return false;
-    return !!data;
-  } catch {
+      .maybeSingle();
+
+    console.log('[checkIsAdmin] Supabase response -> data:', data, 'error:', error);
+
+    if (error) {
+      console.error('[checkIsAdmin] Database query error:', error.message);
+      return false;
+    }
+
+    if (data && data.id === userId) {
+      console.log('[checkIsAdmin] SUCCESS: User verified as admin. IDs match:', data.id);
+      return true;
+    }
+    
+    console.warn('[checkIsAdmin] FAILED: User is authenticated but NOT found in admin_users.');
+    console.warn('-> Auth UUID:', userId);
+    console.warn('-> DB UUID:', data?.id || 'null (No row returned)');
+    
+    return false;
+  } catch (err) {
+    console.error('[checkIsAdmin] Exception thrown:', err);
     return false;
   }
 }
@@ -120,21 +145,19 @@ export function adaptService(row) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /**
- * Signs in an admin user. Accepts a bare username (e.g. "admin") or full email.
- * If no @ symbol, appends @stainedblooms.com.
+ * Signs in an admin user using their full email.
  */
-export async function loginAdmin(usernameOrEmail, password) {
-  const email = usernameOrEmail.includes('@')
-    ? usernameOrEmail
-    : `${usernameOrEmail}@stainedblooms.com`;
-
+export async function loginAdmin(email, password) {
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) {
     if (error.message === 'Invalid login credentials') {
-      throw new Error('Invalid username or password.');
+      throw new Error('Invalid email or password.');
     }
     throw error;
   }
+  
+  console.log('[loginAdmin] Success. Auth User UUID:', data.user?.id);
+  console.log('[loginAdmin] Success. Session UUID:', data.session?.user?.id);
   return data.user;
 }
 
@@ -144,7 +167,14 @@ export async function logoutAdmin() {
   if (error) throw error;
 }
 
-/** Returns the current active Supabase session, or null. */
+/** Returns the currently authenticated user from the server (network request). */
+export async function getUser() {
+  const { data: { user }, error } = await supabase.auth.getUser();
+  if (error) return null;
+  return user;
+}
+
+/** Returns the current active Supabase session (local cache). */
 export async function getSession() {
   const { data: { session }, error } = await supabase.auth.getSession();
   if (error) throw error;

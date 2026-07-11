@@ -31,6 +31,7 @@ import {
   loginAdmin,
   logoutAdmin,
   getSession,
+  getUser,
   adaptCategory,
   adaptGalleryImage,
   adaptService,
@@ -205,9 +206,9 @@ function AdminDashboard() {
   useEffect(() => {
     const checkAuth = async () => {
       try {
-        const session = await getSession();
-        if (session) {
-          const isAdmin = await checkIsAdmin(session.user.id);
+        const user = await getUser();
+        if (user) {
+          const isAdmin = await checkIsAdmin(user.id);
           if (!isAdmin) {
             await logoutAdmin();
             setIsAuthenticated(false);
@@ -291,11 +292,10 @@ function AdminDashboard() {
     e.preventDefault();
     setIsLoading(true);
     try {
-      await loginAdmin(username, password);
-      const session = await getSession();
-      if (!session) throw new Error('Login failed.');
+      const user = await loginAdmin(username, password);
+      if (!user) throw new Error('Login failed.');
       
-      const isAdmin = await checkIsAdmin(session.user.id);
+      const isAdmin = await checkIsAdmin(user.id);
       if (!isAdmin) {
         await logoutAdmin();
         throw new Error('Unauthorized. Admin access required.');
