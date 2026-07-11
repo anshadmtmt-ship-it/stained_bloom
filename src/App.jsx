@@ -322,6 +322,70 @@ const Logo = ({ settings, className }) => {
   );
 };
 
+const GalleryImageCard = memo(({ item, index, onClick, fallbackImage }) => {
+  const [isLoaded, setIsLoaded] = useState(false);
+  const [hasError, setHasError] = useState(false);
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, scale: 0.97 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.97 }}
+      transition={{ duration: 0.22, ease: 'easeOut', delay: Math.min(index * 0.02, 0.15) }}
+      onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onClick();
+        }
+      }}
+      tabIndex={0}
+      role="button"
+      aria-label={`View ${item.title || item.category} image`}
+      className="card-luxury p-2.5 relative group cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#B89A5A] focus:ring-offset-2"
+    >
+      <div className="aspect-square rounded-[16px] overflow-hidden relative bg-[#FAF6F0] shadow-inner">
+        {/* Shimmer Skeleton Placeholder */}
+        {!isLoaded && !hasError && (
+          <div className="absolute inset-0 bg-[#FAF6F0] overflow-hidden rounded-[16px]">
+            <div className="w-full h-full animate-shimmer" />
+          </div>
+        )}
+
+        <img
+          src={item.image}
+          alt={item.title || `${item.category} mehendi design`}
+          className={`w-full h-full object-cover transition-all duration-500 group-hover:scale-[1.03] ${
+            isLoaded ? 'opacity-100' : 'opacity-0'
+          }`}
+          loading="lazy"
+          onLoad={() => setIsLoaded(true)}
+          onError={(e) => {
+            setHasError(true);
+            setIsLoaded(true);
+            e.currentTarget.src = fallbackImage;
+          }}
+        />
+        
+        {isLoaded && !hasError && (
+          <div className="absolute inset-0 bg-[#0E3B2E]/20 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center rounded-[16px]">
+            <span className="text-[#FAF6F0] bg-[#0E3B2E]/90 px-4 py-2 rounded-full text-[9px] tracking-[0.15em] uppercase font-semibold">
+              View Details
+            </span>
+          </div>
+        )}
+      </div>
+      <div className="pt-3 px-1 text-left">
+        <span className="text-[9px] tracking-[0.12em] uppercase text-[#B89A5A] font-semibold">{item.category}</span>
+        <h3 className="text-serif text-sm font-normal text-[#4A3528] mt-0.5 leading-tight group-hover:text-[#0E3B2E] transition-colors">
+          {item.title}
+        </h3>
+      </div>
+    </motion.div>
+  );
+});
+GalleryImageCard.displayName = 'GalleryImageCard';
+
 function App() {
   const [scrolled, setScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -409,10 +473,27 @@ function App() {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  // Filter gallery items
-  const filteredGallery = activeCategory === 'All'
-    ? (cms.gallery || [])
-    : (cms.gallery || []).filter(item => item.category === activeCategory);
+  // Idle Preload all gallery images in background for instant switching
+  useEffect(() => {
+    if (!loading && cms.gallery && cms.gallery.length > 0) {
+      const idleCallback = window.requestIdleCallback || ((cb) => setTimeout(cb, 1500));
+      idleCallback(() => {
+        cms.gallery.forEach((item) => {
+          if (item.image) {
+            const img = new Image();
+            img.src = item.image;
+          }
+        });
+      });
+    }
+  }, [loading, cms.gallery]);
+
+  // Filter gallery items (Memoized to prevent recalculations)
+  const filteredGallery = useMemo(() => {
+    return activeCategory === 'All'
+      ? (cms.gallery || [])
+      : (cms.gallery || []).filter(item => item.category === activeCategory);
+  }, [activeCategory, cms.gallery]);
 
   // Lightbox Navigation
   const nextImage = useCallback(() => {
@@ -684,49 +765,16 @@ function App() {
           >
             <AnimatePresence mode="popLayout">
               {filteredGallery.length > 0 ? filteredGallery.map((item, index) => (
-                <motion.div
-                  layout
-                  initial={{ opacity: 0 }}
-                  whileInView={{ opacity: 1 }}
-                  viewport={{ once: true }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.4 }}
+                <GalleryImageCard
                   key={item.id}
+                  item={item}
+                  index={index}
                   onClick={() => {
                     setCurrentImageIndex(index);
                     setLightboxOpen(true);
                   }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      setCurrentImageIndex(index);
-                      setLightboxOpen(true);
-                    }
-                  }}
-                  tabIndex={0}
-                  role="button"
-                  aria-label={`View ${item.title || item.category} image`}
-                  className="card-luxury p-2.5 relative group cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#B89A5A] focus:ring-offset-2"
-                >
-                  <div className="aspect-square rounded-[16px] overflow-hidden relative bg-[#FAF6F0]">
-                    <img
-                      src={item.image}
-                      alt={item.title || `${item.category} mehendi design`}
-                      className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
-                      loading="lazy"
-                      onError={(e) => { e.currentTarget.src = FALLBACK_IMAGE; }}
-                    />
-                    <div className="absolute inset-0 bg-[#0E3B2E]/20 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center rounded-[16px]">
-                      <span className="text-[#FAF6F0] bg-[#0E3B2E]/90 px-4 py-2 rounded-full text-[9px] tracking-[0.15em] uppercase font-semibold">
-                        View Details
-                      </span>
-                    </div>
-                  </div>
-                  <div className="pt-3 px-1 text-left">
-                    <span className="text-[9px] tracking-[0.12em] uppercase text-[#B89A5A] font-semibold">{item.category}</span>
-                    <h3 className="text-serif text-sm font-normal text-[#4A3528] mt-0.5 leading-tight group-hover:text-[#0E3B2E] transition-colors">{item.title}</h3>
-                  </div>
-                </motion.div>
+                  fallbackImage={FALLBACK_IMAGE}
+                />
               )) : (
                 <motion.div
                   initial={{ opacity: 0 }}

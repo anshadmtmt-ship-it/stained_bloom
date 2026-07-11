@@ -429,6 +429,59 @@ export async function saveGalleryList(galleryList) {
   }
 }
 
+function compressImage(file, maxWidth = 1600, maxHeight = 1600, quality = 0.82) {
+  return new Promise((resolve, reject) => {
+    if (!file.type.startsWith('image/')) {
+      return resolve(file);
+    }
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target.result;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > maxWidth) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          }
+        } else {
+          if (height > maxHeight) {
+            width = Math.round((width * maxHeight) / height);
+            height = maxHeight;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+
+        canvas.toBlob(
+          (blob) => {
+            if (!blob) {
+              return resolve(file);
+            }
+            const compressedFile = new File([blob], file.name, {
+              type: 'image/jpeg',
+              lastModified: Date.now()
+            });
+            resolve(compressedFile);
+          },
+          'image/jpeg',
+          quality
+        );
+      };
+      img.onerror = (err) => reject(err);
+    };
+    reader.onerror = (err) => reject(err);
+  });
+}
+
 // ─── STORAGE OPERATIONS ────────────────────────────────────────────────────────
 
 export async function uploadImage(file) {
@@ -439,18 +492,26 @@ export async function uploadImage(file) {
     throw new Error('Only JPG, JPEG, PNG, and WebP images are allowed.');
   }
 
+  // Compress image before checking final size
+  let fileToUpload = file;
+  try {
+    fileToUpload = await compressImage(file);
+  } catch (e) {
+    console.warn('Image compression failed, using original file:', e);
+  }
+
   // Validate size (10MB limit)
-  if (file.size > 10 * 1024 * 1024) {
+  if (fileToUpload.size > 10 * 1024 * 1024) {
     throw new Error('Image size must be under 10MB.');
   }
 
   try {
-    const fileExt = file.name.split('.').pop() || 'jpg';
+    const fileExt = fileToUpload.name.split('.').pop() || 'jpg';
     const fileName = `uploads/${Date.now()}-${Math.random().toString(36).substring(2, 15)}.${fileExt}`;
     
     const { error: uploadError } = await supabase.storage
       .from('images')
-      .upload(fileName, file, {
+      .upload(fileName, fileToUpload, {
         cacheControl: '3600',
         upsert: false
       });
