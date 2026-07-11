@@ -1,7 +1,7 @@
-import React, { useState, useEffect, memo, useCallback } from 'react';
+import React, { useState, useEffect, memo, useCallback, useMemo } from 'react';
 import MehendiBackground from './MehendiBackground.jsx';
 import { motion, AnimatePresence } from 'framer-motion';
-import { getAllCMSData, subscribeToCMSUpdates } from './cmsHelper.js';
+import { fetchAllPublicData, subscribeCMSUpdates } from './lib/db.js';
 import {
   Send,
   Mail,
@@ -405,28 +405,28 @@ function App() {
   const loadCmsData = useCallback(async () => {
     setError(null);
     try {
-      const data = await getAllCMSData();
+      const data = await fetchAllPublicData();
       if (data) {
         setCms({
-          hero: data.hero || {},
-          services: data.services || [],
-          gallery: data.gallery || [],
+          hero:       data.hero       || {},
+          services:   data.services   || [],
+          gallery:    data.gallery    || [],
           categories: data.categories || [],
-          contact: data.contact || {},
-          settings: data.settings || {}
+          contact:    data.contact    || {},
+          settings:   data.settings   || {},
         });
       }
       setLoading(false);
     } catch (err) {
-      console.error('Failed to load CMS data', err);
-      setError(err.message || 'CMS Connection Error: Failed to connect to Supabase.');
+      console.error('[CMS] Failed to load data:', err);
+      setError(err.message || 'Connection Error: Failed to connect to Supabase.');
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     loadCmsData();
-    const unsubscribe = subscribeToCMSUpdates(loadCmsData);
+    const unsubscribe = subscribeCMSUpdates(loadCmsData);
     return unsubscribe;
   }, [loadCmsData]);
 

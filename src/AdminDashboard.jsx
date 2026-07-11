@@ -8,24 +8,45 @@ import {
   AlertTriangle
 } from 'lucide-react';
 import {
-  getCMSData,
-  saveWebsiteSettings,
-  saveContact,
-  saveCategory,
+  fetchCategories,
+  fetchGalleryImages,
+  fetchGalleryImageUrlsForCategory,
+  fetchServices,
+  fetchContact,
+  fetchSettings,
+  insertCategory,
+  updateCategory,
   deleteCategory,
-  saveCategoriesList,
-  saveService,
-  deleteService,
-  saveServicesList,
-  saveGalleryItem,
-  deleteGalleryItem,
-  saveGalleryList,
-  uploadImage,
-  deleteUploadedImage,
+  reorderCategories,
+  insertGalleryImage,
+  updateGalleryImage,
+  deleteGalleryImage,
+  reorderGalleryImages,
+  insertService,
+  updateService,
+  deleteService as deleteServiceRecord,
+  reorderServices,
+  upsertContact,
+  upsertSettings,
   loginAdmin,
   logoutAdmin,
-  supabase
-} from './cmsHelper';
+  getSession,
+  adaptCategory,
+  adaptGalleryImage,
+  adaptService,
+  adaptSettings,
+  adaptHero,
+  adaptContact,
+  checkIsAdmin,
+} from './lib/db.js';
+import {
+  uploadGalleryImage,
+  uploadLogoImage,
+  uploadHeroImage,
+  deleteGalleryImageFiles,
+  deleteStorageFile,
+} from './lib/storage.js';
+import { seedIfEmpty } from './lib/seed.js';
 
 const ICONS_MAP = {
   Sparkles: Sparkles,
@@ -117,8 +138,9 @@ function AdminDashboard() {
   const [settings, setSettings] = useState(null);
   const [hero, setHero] = useState(null);
 
-  // Selected category in gallery tab
+  // Selected category in gallery tab (name for display/filter, id for DB FK operations)
   const [selectedCatName, setSelectedCatName] = useState('');
+  const [selectedCatId,   setSelectedCatId]   = useState(null);
 
   // Category inline edit states
   const [renamingCatId, setRenamingCatId] = useState(null);
@@ -179,22 +201,32 @@ function AdminDashboard() {
     setTimeout(() => setNotification({ msg: '', type: 'success' }), 3000);
   };
 
-  // Check Auth & load settings
+  // Check Auth & seed DB defaults if empty
   useEffect(() => {
     const checkAuth = async () => {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
+        const session = await getSession();
         if (session) {
+          const isAdmin = await checkIsAdmin(session.user.id);
+          if (!isAdmin) {
+            await logoutAdmin();
+            setIsAuthenticated(false);
+            setLoginError('Unauthorized. Admin access required.');
+            setIsLoading(false);
+            return;
+          }
           setIsAuthenticated(true);
           await loadData();
         } else {
-          // Just fetch branding settings for the login page
-          const loadedSettings = await getCMSData('settings');
-          setSettings(loadedSettings || {});
+          // Fetch branding settings for the login page logo
+          const settingsRow = await fetchSettings();
+          setSettings(adaptSettings(settingsRow));
           setIsLoading(false);
+          // Attempt seed in background (won't block login UI)
+          seedIfEmpty().catch(() => {});
         }
       } catch (e) {
-        console.warn("Failed session check:", e);
+        console.warn('[Admin] Session check failed:', e.message);
         setIsLoading(false);
       }
     };
@@ -217,39 +249,39 @@ function AdminDashboard() {
     setIsLoading(true);
     setConnectionError(null);
     try {
-      const [
-        loadedCategories,
-        loadedServices,
-        loadedGallery,
-        loadedContact,
-        loadedSettings,
-        loadedHero
-      ] = await Promise.all([
-        getCMSData('categories'),
-        getCMSData('services'),
-        getCMSData('gallery'),
-        getCMSData('contact'),
-        getCMSData('settings'),
-        getCMSData('hero')
+      const [rawCategories, rawServices, rawContact, rawSettings] = await Promise.all([
+        fetchCategories(),
+        fetchServices(),
+        fetchContact(),
+        fetchSettings(),
       ]);
 
-      const validCategories = loadedCategories || [];
-      setCategories(validCategories);
+      // Build lookup map to resolve category name from UUID in gallery images
+      const categoriesById = {};
+      (rawCategories || []).forEach((c) => { categoriesById[c.id] = c; });
 
-      // Default select the first non-'All' category
-      const firstCat = validCategories.find(c => c.name !== 'All');
+      const rawGallery = await fetchGalleryImages();
+
+      // Adapt raw DB rows to legacy UI shapes using adapter functions
+      const adaptedCategories = (rawCategories || []).map(adaptCategory);
+
+      setCategories(adaptedCategories);
+
+      // Default-select first category
+      const firstCat = adaptedCategories[0];
       if (firstCat) {
         setSelectedCatName(firstCat.name);
+        setSelectedCatId(firstCat.id);
       }
 
-      setServices(loadedServices || []);
-      setGallery(loadedGallery || []);
-      setContact(loadedContact || {});
-      setSettings(loadedSettings || {});
-      setHero(loadedHero || {});
+      setServices((rawServices || []).map(adaptService));
+      setGallery((rawGallery || []).map((img) => adaptGalleryImage(img, categoriesById)));
+      setContact(adaptContact(rawContact));
+      setSettings(adaptSettings(rawSettings));
+      setHero(adaptHero(rawSettings));
     } catch (e) {
-      console.error(e);
-      setConnectionError(e.message || 'CMS Connection Error: Failed to retrieve cloud CMS data.');
+      console.error('[Admin] loadData error:', e);
+      setConnectionError(e.message || 'Connection Error: Failed to retrieve CMS data.');
     } finally {
       setIsLoading(false);
     }
@@ -260,6 +292,15 @@ function AdminDashboard() {
     setIsLoading(true);
     try {
       await loginAdmin(username, password);
+      const session = await getSession();
+      if (!session) throw new Error('Login failed.');
+      
+      const isAdmin = await checkIsAdmin(session.user.id);
+      if (!isAdmin) {
+        await logoutAdmin();
+        throw new Error('Unauthorized. Admin access required.');
+      }
+      
       setIsAuthenticated(true);
       setLoginError('');
       await loadData();
@@ -284,7 +325,9 @@ function AdminDashboard() {
   };
 
   // ─── IMAGE UPLOAD HANDLING ───────────────────────────────────────────────────
-  const handleImageSelect = async (e, callback) => {
+  // uploadType: 'gallery' | 'logo' | 'hero'
+  // Gallery uploads return { imageUrl, thumbnailUrl }; logo/hero return a URL string.
+  const handleImageSelect = async (e, callback, uploadType = 'gallery') => {
     const file = e.target.files[0];
     if (!file) return;
 
@@ -292,8 +335,15 @@ function AdminDashboard() {
     showNotification('Uploading image to cloud storage...', 'info');
 
     try {
-      const imageUrl = await uploadImage(file);
-      await callback(imageUrl);
+      let result;
+      if (uploadType === 'logo') {
+        result = await uploadLogoImage(file);
+      } else if (uploadType === 'hero') {
+        result = await uploadHeroImage(file);
+      } else {
+        result = await uploadGalleryImage(file); // returns { imageUrl, thumbnailUrl }
+      }
+      await callback(result);
     } catch (err) {
       showAlert('Upload Failed', err.message || 'Failed to upload image. Please try again.');
     } finally {
@@ -309,6 +359,7 @@ function AdminDashboard() {
       return;
     }
     const cleanName = newCatVal.trim();
+    // Client-side duplicate check before hitting the DB
     if (categories.find(c => c.name.toLowerCase() === cleanName.toLowerCase())) {
       showAlert('Duplicate Category', 'A category with that name already exists.');
       setIsAddingCat(false);
@@ -318,14 +369,11 @@ function AdminDashboard() {
 
     setIsSaving(true);
     try {
-      const newCat = {
-        name: cleanName,
-        isVisible: true,
-        order: categories.length
-      };
-      await saveCategory(newCat);
+      const newCatRow = await insertCategory(cleanName, categories.length);
       await loadData();
+      // Auto-select the newly created category
       setSelectedCatName(cleanName);
+      setSelectedCatId(newCatRow.id);
       setNewCatVal('');
       setIsAddingCat(false);
       showNotification('✓ Category created successfully.');
@@ -353,18 +401,11 @@ function AdminDashboard() {
 
     setIsSaving(true);
     try {
-      await saveCategory({ ...originalCat, name: cleanName });
-      
-      // Update items inside this category immediately
-      const itemsToUpdate = gallery.filter(g => g.category === originalCat.name);
-      for (const item of itemsToUpdate) {
-        await saveGalleryItem({ ...item, category: cleanName });
-      }
-
+      // FK-based schema: gallery_images use category_id (UUID), so renaming the
+      // category name does NOT require updating any gallery image records.
+      await updateCategory(catId, { name: cleanName });
       await loadData();
-      if (selectedCatName === originalCat.name) {
-        setSelectedCatName(cleanName);
-      }
+      if (selectedCatName === originalCat.name) setSelectedCatName(cleanName);
       setRenamingCatId(null);
       showNotification('✓ Category renamed successfully.');
     } catch (e) {
@@ -381,11 +422,13 @@ function AdminDashboard() {
       async () => {
         setIsSaving(true);
         try {
-          // Clean up files in storage
-          const imagesToDelete = gallery.filter(g => g.category === catName);
-          for (const item of imagesToDelete) {
-            await deleteUploadedImage(item.image);
-          }
+          // 1. Fetch all image URLs for this category (for storage cleanup)
+          const imageRecords = await fetchGalleryImageUrlsForCategory(catId);
+          // 2. Delete from Supabase Storage (main + thumbnails)
+          await Promise.allSettled(
+            imageRecords.map(img => deleteGalleryImageFiles(img.image_url, img.thumbnail_url))
+          );
+          // 3. Delete the category — gallery_images cascade-delete via FK
           await deleteCategory(catId);
           await loadData();
           showNotification('✓ Category deleted successfully.');
@@ -399,21 +442,18 @@ function AdminDashboard() {
   };
 
   const moveCategoryInline = async (editableIndex, direction) => {
-    const actualIndex = editableIndex + 1; // skip 'All' at index 0
     const newCats = [...categories];
-    const editableCatCount = categories.filter(c => c.name !== 'All').length;
+    const editableCatCount = categories.length;
 
-    if (direction === 'left' && editableIndex > 0) {
-      const targetIndex = actualIndex - 1;
-      [newCats[actualIndex], newCats[targetIndex]] = [newCats[targetIndex], newCats[actualIndex]];
-    } else if (direction === 'right' && editableIndex < editableCatCount - 1) {
-      const targetIndex = actualIndex + 1;
-      [newCats[actualIndex], newCats[targetIndex]] = [newCats[targetIndex], newCats[actualIndex]];
-    }
+    if (direction === 'left'  && editableIndex === 0) return;
+    if (direction === 'right' && editableIndex === editableCatCount - 1) return;
+
+    const targetIndex = direction === 'left' ? editableIndex - 1 : editableIndex + 1;
+    [newCats[editableIndex], newCats[targetIndex]] = [newCats[targetIndex], newCats[editableIndex]];
 
     setIsSaving(true);
     try {
-      await saveCategoriesList(newCats);
+      await reorderCategories(newCats.map(c => c.id));
       await loadData();
       showNotification('✓ Categories reordered.');
     } catch (e) {
@@ -424,28 +464,32 @@ function AdminDashboard() {
   };
 
   // ─── GALLERY MUTATIONS (IMMEDIATE AUTO-SAVE) ───────────────────────────────────
-  const handleAddImage = async (imageUrl) => {
+  // handleAddImage receives { imageUrl, thumbnailUrl } from handleImageSelect
+  const handleAddImage = async ({ imageUrl, thumbnailUrl }) => {
     const currentImages = gallery.filter(g => g.category === selectedCatName);
     if (currentImages.length >= 8) {
       showAlert('Limit Reached', 'Maximum 8 images are allowed in each category.');
       return;
     }
+    if (!selectedCatId) {
+      showAlert('No Category', 'Please select or create a category before uploading images.');
+      return;
+    }
 
     setIsSaving(true);
     try {
-      const newItem = {
-        category: selectedCatName,
-        image: imageUrl,
-        title: '',
-        description: '',
-        order: currentImages.length,
-        visible: true
-      };
-      await saveGalleryItem(newItem);
+      await insertGalleryImage({
+        category_id:   selectedCatId,
+        image_url:     imageUrl,
+        thumbnail_url: thumbnailUrl,
+        title:         '',
+        description:   '',
+        display_order: currentImages.length,
+      });
       await loadData();
       showNotification('✓ Image saved successfully.');
     } catch (e) {
-      showAlert('Save Failed', 'Failed to save image record: ' + e.message);
+      showAlert('Save Failed', e.message || 'Failed to save image record.');
     } finally {
       setIsSaving(false);
     }
@@ -454,7 +498,12 @@ function AdminDashboard() {
   const handleSaveImageDetails = async () => {
     setIsSaving(true);
     try {
-      await saveGalleryItem(editingImage);
+      await updateGalleryImage(editingImage.id, {
+        title:         editingImage.title,
+        description:   editingImage.description,
+        image_url:     editingImage.image,
+        thumbnail_url: editingImage.thumbnail,
+      });
       await loadData();
       setEditingImage(null);
       showNotification('✓ Image details updated.');
@@ -472,8 +521,10 @@ function AdminDashboard() {
       async () => {
         setIsSaving(true);
         try {
-          await deleteUploadedImage(item.image);
-          await deleteGalleryItem(item.id);
+          // Delete from Storage first (main + thumbnail)
+          await deleteGalleryImageFiles(item.image, item.thumbnail);
+          // Then delete DB record
+          await deleteGalleryImage(item.id);
           await loadData();
           showNotification('✓ Image deleted.');
         } catch (e) {
@@ -504,19 +555,8 @@ function AdminDashboard() {
 
     setIsSaving(true);
     try {
-      // Map other images back to the main list with their new display orders
-      const updatedList = gallery.map(item => {
-        if (item.category === selectedCatName) {
-          const newIdx = newImages.findIndex(img => img.id === item.id);
-          return { ...item, order: newIdx };
-        }
-        return item;
-      });
-
-      // Sort the list properly before sending
-      updatedList.sort((a, b) => a.order - b.order);
-
-      await saveGalleryList(updatedList);
+      const orderedIds = newImages.map(img => img.id);
+      await reorderGalleryImages(selectedCatId, orderedIds);
       await loadData();
       showNotification('✓ Image order updated.');
     } catch (err) {
@@ -530,27 +570,15 @@ function AdminDashboard() {
   const handleAddService = async () => {
     setIsSaving(true);
     try {
-      const newSvc = {
-        name: 'New Package',
-        description: 'Bespoke Mehendi package tailored for your celebration.',
-        icon: 'Sparkles',
-        isFeatured: false,
-        order: services.length
-      };
-      const created = await saveService(newSvc);
+      const created = await insertService({
+        title:         'New Package',
+        description:   'Bespoke Mehendi package tailored for your celebration.',
+        icon:          'Sparkles',
+        display_order: services.length,
+      });
       await loadData();
-      
-      // Auto-open modal for the new service
-      if (created) {
-        setEditingSvc({
-          id: created.id,
-          name: created.title,
-          description: created.description,
-          icon: created.icon,
-          isFeatured: created.featured,
-          order: created.display_order
-        });
-      }
+      // Auto-open modal for the new service using the adapter
+      if (created) setEditingSvc(adaptService(created));
       showNotification('✓ Service package added.');
     } catch (e) {
       showAlert('Save Failed', 'Failed to add service: ' + e.message);
@@ -562,7 +590,11 @@ function AdminDashboard() {
   const handleSaveServiceDetails = async () => {
     setIsSaving(true);
     try {
-      await saveService(editingSvc);
+      await updateService(editingSvc.id, {
+        title:       editingSvc.name,
+        description: editingSvc.description,
+        icon:        editingSvc.icon,
+      });
       await loadData();
       setEditingSvc(null);
       showNotification('✓ Service package updated.');
@@ -580,7 +612,7 @@ function AdminDashboard() {
       async () => {
         setIsSaving(true);
         try {
-          await deleteService(svcId);
+          await deleteServiceRecord(svcId);
           await loadData();
           showNotification('✓ Service package deleted.');
         } catch (e) {
@@ -593,7 +625,7 @@ function AdminDashboard() {
   };
 
   const moveServiceInline = async (index, direction) => {
-    if (direction === 'up' && index === 0) return;
+    if (direction === 'up'   && index === 0) return;
     if (direction === 'down' && index === services.length - 1) return;
 
     const newSvcs = [...services];
@@ -602,7 +634,7 @@ function AdminDashboard() {
 
     setIsSaving(true);
     try {
-      await saveServicesList(newSvcs);
+      await reorderServices(newSvcs.map(s => s.id));
       await loadData();
       showNotification('✓ Services reordered.');
     } catch (e) {
@@ -616,7 +648,12 @@ function AdminDashboard() {
   const triggerContactAutoSave = async (updatedContact) => {
     setIsSaving(true);
     try {
-      await saveContact(updatedContact);
+      await upsertContact({
+        instagram_url:   updatedContact.instagramUrl,
+        whatsapp_number: updatedContact.whatsappNumber,
+        email_address:   updatedContact.emailAddress,
+        cta_button_text: updatedContact.ctaText,
+      });
       setContact(updatedContact);
       showNotification('✓ Contact details saved successfully.');
     } catch (e) {
@@ -627,12 +664,31 @@ function AdminDashboard() {
   };
 
   // ─── SETTINGS AUTO-SAVE ──────────────────────────────────────────────────────
+  // Builds a DB payload from the UI-shaped settings/hero objects
   const triggerSettingsAutoSave = async (updatedSettings, updatedHero) => {
     setIsSaving(true);
     try {
-      await saveWebsiteSettings(updatedSettings, updatedHero);
+      const payload = {};
+      if (updatedSettings) {
+        if (updatedSettings.websiteName     !== undefined) payload.website_name     = updatedSettings.websiteName;
+        if (updatedSettings.logo            !== undefined) payload.logo_url          = updatedSettings.logo;
+        if (updatedSettings.favicon         !== undefined) payload.favicon_url       = updatedSettings.favicon;
+        if (updatedSettings.footerText      !== undefined) payload.footer_text       = updatedSettings.footerText;
+        if (updatedSettings.metaTitle       !== undefined) payload.meta_title        = updatedSettings.metaTitle;
+        if (updatedSettings.metaDescription !== undefined) payload.meta_description  = updatedSettings.metaDescription;
+      }
+      if (updatedHero) {
+        if (updatedHero.heading             !== undefined) payload.hero_title         = updatedHero.heading;
+        if (updatedHero.description         !== undefined) payload.hero_subtitle      = updatedHero.description;
+        if (updatedHero.image               !== undefined) payload.hero_image_url     = updatedHero.image;
+        if (updatedHero.buttonText          !== undefined) payload.primary_cta_text   = updatedHero.buttonText;
+        if (updatedHero.buttonUrl           !== undefined) payload.primary_cta_url    = updatedHero.buttonUrl;
+        if (updatedHero.secondaryButtonText !== undefined) payload.secondary_cta_text = updatedHero.secondaryButtonText;
+        if (updatedHero.secondaryButtonUrl  !== undefined) payload.secondary_cta_url  = updatedHero.secondaryButtonUrl;
+      }
+      await upsertSettings(payload);
       if (updatedSettings) setSettings(updatedSettings);
-      if (updatedHero) setHero(updatedHero);
+      if (updatedHero)     setHero(updatedHero);
       showNotification('✓ Branding settings saved successfully.');
     } catch (e) {
       showNotification('✕ Save failed: ' + e.message, 'error');
@@ -903,11 +959,11 @@ function AdminDashboard() {
                   {categories.filter(c => c.name !== 'All').map((cat, idx) => (
                     <div
                       key={cat.id}
-                      onClick={() => setSelectedCatName(cat.name)}
+                      onClick={() => { setSelectedCatName(cat.name); setSelectedCatId(cat.id); }}
                       role="button"
                       tabIndex={0}
                       aria-pressed={selectedCatName === cat.name}
-                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setSelectedCatName(cat.name); }}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { setSelectedCatName(cat.name); setSelectedCatId(cat.id); } }}
                       className={`relative px-5 py-4 rounded-2xl border-2 cursor-pointer transition-all flex flex-col justify-between min-w-[150px] h-[110px] ${
                         selectedCatName === cat.name
                           ? 'border-[#B89A5A] bg-[#0E3B2E]/5 text-[#0E3B2E]'
@@ -1137,7 +1193,7 @@ function AdminDashboard() {
                           accept="image/jpeg,image/png,image/webp,image/jpg"
                           id="image-grid-upload"
                           className="absolute inset-0 opacity-0 cursor-pointer"
-                          onChange={(e) => handleImageSelect(e, (url) => handleAddImage(url))}
+                          onChange={(e) => handleImageSelect(e, (result) => handleAddImage(result), 'gallery')}
                           aria-label="Upload new image"
                         />
                         <Plus className="w-8 h-8 text-[#B89A5A] mb-1" aria-hidden="true" />
@@ -1417,7 +1473,7 @@ function AdminDashboard() {
                           onChange={(e) => handleImageSelect(e, async (url) => {
                             const newSettings = { ...settings, logo: url };
                             await triggerSettingsAutoSave(newSettings, null);
-                          })}
+                          }, 'logo')}
                         />
                         <label htmlFor="logo-image-file" className="btn-outline px-4 py-2 text-[9px] uppercase tracking-widest font-bold cursor-pointer">
                           Upload Logo
@@ -1444,7 +1500,7 @@ function AdminDashboard() {
                           onChange={(e) => handleImageSelect(e, async (url) => {
                             const newSettings = { ...settings, favicon: url };
                             await triggerSettingsAutoSave(newSettings, null);
-                          })}
+                          }, 'logo')}
                         />
                         <label htmlFor="favicon-image-file" className="btn-outline px-4 py-2 text-[9px] uppercase tracking-widest font-bold cursor-pointer">
                           Upload Favicon
@@ -1525,7 +1581,7 @@ function AdminDashboard() {
                         onChange={(e) => handleImageSelect(e, async (url) => {
                           const newHero = { ...hero, image: url };
                           await triggerSettingsAutoSave(null, newHero);
-                        })}
+                        }, 'hero')}
                       />
                       <label htmlFor="hero-banner-file" className="btn-outline px-5 py-2.5 text-[9px] uppercase tracking-widest font-bold cursor-pointer inline-block">
                         Upload Hero Image
@@ -1707,13 +1763,12 @@ function AdminDashboard() {
                   accept="image/jpeg,image/png,image/webp,image/jpg"
                   id="modal-change-image"
                   className="hidden"
-                  onChange={(e) => handleImageSelect(e, async (url) => {
-                    // Try to delete old storage file if replacing
-                    if (editingImage.image) {
-                      await deleteUploadedImage(editingImage.image);
-                    }
-                    setEditingImage({ ...editingImage, image: url });
-                  })}
+                  onChange={(e) => handleImageSelect(e, async ({ imageUrl, thumbnailUrl }) => {
+                    // Delete old storage files before replacing
+                    if (editingImage.image)     await deleteStorageFile(editingImage.image);
+                    if (editingImage.thumbnail) await deleteStorageFile(editingImage.thumbnail);
+                    setEditingImage({ ...editingImage, image: imageUrl, thumbnail: thumbnailUrl });
+                  }, 'gallery')}
                 />
                 <label
                   htmlFor="modal-change-image"

@@ -1,60 +1,105 @@
-# Stained Blooms CMS — Production Backup & Recovery Strategy
+# Stained Blooms — Backup & Recovery Guide
 
-This document outlines the backup and recovery procedures for the Stained Blooms cloud-powered CMS hosted on Supabase.
+> This document covers backup procedures and disaster-recovery workflows.
+> **No automatic backups are configured.** Run these manually as needed.
 
 ---
 
-## 1. Database Backup Procedure
+## Database Backup
 
-Supabase automatically takes daily backups of your project's database. However, for major deployments or manual backups, follow these instructions:
+### Supabase Point-in-Time Recovery (Built-in)
+Supabase Pro/Team plans include automatic daily backups with 7-day retention (Pro) or 30-day (Team).
 
-### Automated Daily Backups
-- Supabase performs automatic nightly backups for all projects.
-- Backups are retained for 7 days (Free tier) or 30 days (Pro tier).
-- Accessible via your Supabase Dashboard: **Project Settings > Backups**.
+Check your plan at: **Supabase Dashboard → Project → Database → Backups**
 
-### Manual Database Export (via CLI)
-If you need an immediate backup before making major schema changes, you can dump the database using the Supabase CLI or standard `pg_dump`:
+### Manual Export via Supabase Dashboard
+1. Go to **Supabase Dashboard → Database → Backups**
+2. Click **"Download"** on any snapshot
+3. Store the `.dump` file in a secure location (not in this repo)
 
+### Manual Export via pg_dump (requires DB connection string)
 ```bash
-# Export the entire database (schema + data) to a local SQL file
-pg_dump -h db.your-project-ref.supabase.co -U postgres -d postgres > database_backup_$(date +%F).sql
+# Get connection string from: Supabase Dashboard → Project Settings → Database → Connection string
+pg_dump "postgresql://..." \
+  --format=custom \
+  --file="stained_blooms_$(date +%Y%m%d).dump" \
+  --no-acl \
+  --no-owner
 ```
-*Note: You can find your database connection details under **Project Settings > Database**.*
 
 ---
 
-## 2. Media Storage Backup Procedure
+## Storage Backup
 
-Supabase Storage files (uploaded images) are stored in your project's S3-compatible buckets. They are not included in daily database dumps.
-
-### Automated Backups
-- For Pro projects, bucket backups can be configured directly through AWS S3 replication or Supabase backups.
-
-### Manual Media Download
-To create a local backup of your gallery and branding images:
-1. Log in to the **Supabase Dashboard**.
-2. Go to **Storage > Buckets > images**.
-3. Select the folder or files you wish to backup and click **Download** to save them locally.
+### Manual Download via Supabase Dashboard
+1. Go to **Supabase Dashboard → Storage**
+2. Open each bucket: `gallery`, `logo`, `hero`, `backgrounds`
+3. Download files as needed
+4. Store locally or in a separate cloud location
 
 ---
 
-## 3. Disaster Recovery Steps
+## Recovery Workflow
 
-If data corruption occurs or you need to restore the system to a clean state:
+### Scenario: Accidentally deleted a gallery image
+1. If the deletion happened recently, check if Supabase has a Point-in-Time Recovery snapshot
+2. In Supabase Dashboard → Database → Restore → choose a timestamp before the deletion
+3. After DB restore, re-upload the image via the Admin Panel to regenerate storage
 
-### Restoring Database to a Daily Backup Point
-1. In the Supabase Dashboard, go to **Project Settings > Backups**.
-2. Select the backup point from the list.
-3. Click **Restore** to revert the database state.
-
-### Re-initializing Database & Seeding (Clean Slate)
-If you want to completely rebuild the database schema from scratch:
-1. Open the Supabase **SQL Editor**.
-2. Run the table creation commands listed in the [Implementation Plan](.agents/skills/antigravity_guide/../../implementation_plan.md) (or run migrations).
-3. Set your environment variables in `.env`.
-4. Run the automated seed script to upload default assets to Storage and seed database rows:
+### Scenario: All data lost (nuclear recovery)
+1. Restore the database from a `.dump` backup:
    ```bash
-   node scripts/uploadSeedImages.js
+   pg_restore "postgresql://..." \
+     --no-acl --no-owner \
+     stained_blooms_YYYYMMDD.dump
    ```
-5. Confirm that the default categories, images, settings, and services are restored in the preview.
+2. Manually re-upload any images via the Admin Panel
+3. Verify all public URLs in the `gallery_images` table point to valid storage files
+
+### Scenario: Wrong content published
+1. Log into the Admin Panel at `/stainedbloomsadmin`
+2. Make corrections directly — changes are live immediately with no redeployment needed
+
+---
+
+## Data Integrity Checks
+
+Run these SQL queries in **Supabase SQL Editor** as needed:
+
+```sql
+-- Find gallery images with invalid storage URLs
+SELECT id, category_id, image_url
+FROM gallery_images
+WHERE image_url IS NULL OR image_url = '' OR image_url NOT LIKE 'https://%';
+
+-- Find categories with more than 8 images
+SELECT category_id, COUNT(*) AS image_count
+FROM gallery_images
+GROUP BY category_id
+HAVING COUNT(*) > 8;
+
+-- Check for orphaned gallery_images (no parent category)
+SELECT gi.*
+FROM gallery_images gi
+LEFT JOIN gallery_categories gc ON gi.category_id = gc.id
+WHERE gc.id IS NULL;
+```
+
+---
+
+## Deployment Checklist
+
+| Environment | Status |
+|---|---|
+| Local (`npm run dev`) | reads `.env.local` |
+| GitHub | `.env.local` is gitignored |
+| Vercel | Set env vars in Vercel Dashboard → Project → Settings → Environment Variables |
+| Supabase | All data lives here — no deployment needed |
+
+Set these two variables in Vercel:
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_PUBLISHABLE_KEY`
+
+---
+
+*Last updated: July 2026*

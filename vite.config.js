@@ -8,9 +8,5 @@ export default defineConfig({
     react(),
     tailwindcss(),
   ],
-  server: {
-    proxy: {
-      '/api': 'http://localhost:3001'
-    }
-  }
+  // Express API proxy removed — all data now comes directly from Supabase
 })
